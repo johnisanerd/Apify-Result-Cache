@@ -152,7 +152,21 @@ async def test_a_failed_lookup_is_a_miss_with_one_warning(actor, db, s3, serve_e
 
     assert await cache.lookup_many([hexkey(1)], 90) == {}
     assert await cache.lookup_many([hexkey(2)], 90) == {}
+    assert len(db.lookup_calls) == 4                      # each lookup tried twice
     assert len([w for w in actor.log.warnings if "lookup unavailable" in w]) == 1
+
+
+async def test_one_slow_lookup_is_retried(actor, db, s3, serve_env):
+    """Measured 2026-09-30: lookups take ~50-180 ms, with a rare >2.5 s spike."""
+    db.lookup_rows = [row(hexkey(1))]
+    db.lookup_fail_times = 1
+    cache = await start()
+
+    found = await cache.lookup_many([hexkey(1)], 90)
+
+    assert list(found) == [hexkey(1)]
+    assert len(db.lookup_calls) == 2
+    assert actor.log.warnings == []
 
 
 async def test_put_then_get_returns_exactly_what_was_stored(actor, db, s3, serve_env):

@@ -39,9 +39,12 @@ class CacheDB:
             transport=transport,
         )
 
-    async def _rpc(self, function: str, params: dict[str, object]) -> Any:
+    async def _rpc(self, function: str, params: dict[str, object], *, read_timeout: float | None = None) -> Any:
+        kwargs: dict[str, Any] = {}
+        if read_timeout is not None:
+            kwargs["timeout"] = httpx.Timeout(connect=2.0, read=read_timeout, write=2.0, pool=2.0)
         try:
-            response = await self._client.post(f"{self._endpoint}/{function}", json=params)
+            response = await self._client.post(f"{self._endpoint}/{function}", json=params, **kwargs)
         except Exception as exc:  # noqa: BLE001 - not only httpx.HTTPError: InvalidURL is a plain Exception
             # Type name only. The full exception can carry the project URL, and
             # this string lands in a public Actor log.
@@ -66,11 +69,17 @@ class CacheDB:
         except (TypeError, ValueError):
             raise CacheDBError("bad response") from None
 
-    async def cache_lookup(self, namespace: str, keys: list[str], max_age_days: int) -> list[dict[str, Any]]:
-        """Index rows for `keys` fetched within `max_age_days` and not expired."""
+    async def cache_lookup(self, namespace: str, keys: list[str], max_age_days: int,
+                           *, read_timeout: float | None = 4.0) -> list[dict[str, Any]]:
+        """Index rows for `keys` fetched within `max_age_days` and not expired.
+
+        A longer read timeout than the other calls: this runs once per run,
+        before any video starts, and a slow answer is worth waiting for.
+        """
         result = await self._rpc(
             "cache_lookup",
             {"p_namespace": namespace, "p_keys": list(keys), "p_max_age_days": int(max_age_days)},
+            read_timeout=read_timeout,
         )
         if result is None:
             return []

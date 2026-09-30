@@ -61,8 +61,9 @@ _MAX_CONSECUTIVE_FAILURES = 3
 # close() gives the index and the storage this long, in total.
 _CLOSE_BUDGET_S = 6.0
 _MAX_DRAIN_CALLS = 10
-# cache_lookup() accepts at most this many keys per call.
+# cache_lookup() accepts at most this many keys per call; each call gets one retry.
 _LOOKUP_CHUNK = 100
+_LOOKUP_ATTEMPTS = 2
 # cache_put() refuses larger objects; the largest real transcript is ~0.4 MB gzipped.
 _BLOB_MAX_BYTES = 2_000_000
 # Payloads waiting to be stored, in encoded bytes. Past this, new ones are dropped.
@@ -345,9 +346,11 @@ class ResultCache:
     async def lookup_many(self, keys: Sequence[str], max_age_days: int) -> dict[str, CacheEntry]:
         """Index entries for `keys` fetched within `max_age_days` and not expired.
 
-        One RPC per 100 keys. Returns {} when not serving, when max_age_days is
-        0 or less, and on any failure. Entries written under another
-        schema_version are left out: they are misses.
+        One RPC per 100 keys, retried once: this is the one place a run can
+        afford to wait, and a single slow answer would otherwise turn every hit
+        in the run into a fresh fetch. Returns {} when not serving, when
+        max_age_days is 0 or less, and on any failure. Entries written under
+        another schema_version are left out: they are misses.
         """
         if not self.serving or self._db is None:
             return {}
@@ -361,10 +364,16 @@ class ResultCache:
         found: dict[str, CacheEntry] = {}
         for start in range(0, len(wanted), _LOOKUP_CHUNK):
             chunk = wanted[start:start + _LOOKUP_CHUNK]
-            try:
-                rows = await self._db.cache_lookup(self._namespace, chunk, days)
-            except Exception as exc:  # noqa: BLE001 - a failed lookup is a miss
-                self._warn_once("lookup", messages.lookup_unavailable(str(exc)))
+            rows = None
+            last_exc: BaseException | None = None
+            for _attempt in range(_LOOKUP_ATTEMPTS):
+                try:
+                    rows = await self._db.cache_lookup(self._namespace, chunk, days)
+                    break
+                except Exception as exc:  # noqa: BLE001 - a failed lookup is a miss
+                    last_exc = exc
+            if rows is None:
+                self._warn_once("lookup", messages.lookup_unavailable(str(last_exc)))
                 return found
             for row in rows:
                 entry = _entry_from_row(row)

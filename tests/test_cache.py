@@ -599,6 +599,20 @@ async def test_rpc_sends_the_expected_shape_and_parses_the_count():
     assert seen["body"] == b'{"p_rows":[{"a":1},{"a":2},{"a":3}]}'
 
 
+async def test_lookup_gets_a_longer_read_timeout():
+    seen = {}
+
+    def handler(request):
+        seen["timeout"] = request.extensions.get("timeout")
+        return httpx.Response(200, json=[])
+
+    db = CacheDB("https://secret.invalid", "k", transport=_transport(handler))
+    await db.cache_lookup("ns", ["a" * 64], 90)
+    await db.aclose()
+
+    assert seen["timeout"]["read"] == 4.0
+
+
 async def test_rpc_void_and_bad_bodies():
     def void(request):
         return httpx.Response(204)

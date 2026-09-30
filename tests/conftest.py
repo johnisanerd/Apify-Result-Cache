@@ -72,6 +72,7 @@ class FakeDB:
         self.url = ""
         self.lookup_rows: list[dict] = []
         self.lookup_fail = False
+        self.lookup_fail_times = 0     # fail this many calls, then succeed
         self.put_fail = False
 
     async def cache_log(self, rows: list[dict]) -> int:
@@ -88,6 +89,9 @@ class FakeDB:
         self.lookup_calls.append((namespace, list(keys), max_age_days))
         if self.lookup_fail:
             raise CacheDBError("HTTP 503")
+        if self.lookup_fail_times > 0:
+            self.lookup_fail_times -= 1
+            raise CacheDBError("ReadTimeout")
         return [row for row in self.lookup_rows if row["key_hash"] in keys]
 
     async def cache_put(self, **fields) -> None:

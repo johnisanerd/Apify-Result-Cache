@@ -43,6 +43,7 @@ technical decisions.
 | 19 | One batched lookup before the videos start; blob GET only on a hit; uploads in a background queue capped at 32 MB, one in flight. | Keeps the per-video path free of index round trips and bounds memory on runs with many misses. |
 | 20 | Each request logs exactly one outcome (`hit` / `miss` / `bypass` / `error`). | `cache_stats` counts rows as requests; one row per request keeps both the key-repetition rate and the real hit rate honest. |
 | 21 | Storage breaker: three consecutive storage failures stop serving for the run; a missing object or a failed digest check does not count. | An outage costs at most three slow requests; a single bad object is just a miss. |
+| 22 | The run's one lookup gets a 4 s read timeout and one retry (0.2.1). | Measured 2026-09-30: lookups take 50-180 ms, with a rare spike past 2.5 s. One slow answer would otherwise turn every hit in the run into a fresh fetch; worst case the run starts ~8 s later and fetches fresh. |
 
 ## State machine
 
