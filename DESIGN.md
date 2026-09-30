@@ -1,0 +1,78 @@
+# Apify Result Cache — Design
+
+> One shared library that lets any Actor in the fleet serve a repeat request from our
+> own store instead of re-scraping it, and that measures how often requests repeat
+> before it serves anything.
+
+Built for `johnvc/YoutubeTranscripts` first, where a transcript fetched through
+residential proxy costs roughly 10x what serving it from a cache would. The economics,
+the phase gates and the storage decision are in the owner's plan documents
+(`RESULT_CACHE_PLAN.md`, `RESULT_CACHE_HANDOFF_YOUTUBE.md`); this file records the
+technical decisions.
+
+## Phases
+
+| Phase | Library | Mode | What happens |
+| --- | --- | --- | --- |
+| 0 | 0.1 | `keys` | Record one row per request. No output change. 14 days, then the gate: paid hit rate >= 25% go, 15-25% ask, < 15% stop. |
+| 1 | 0.2 | `serve` | Look up before fetching; serve hits from the bucket; store misses. New per-run input `maxAgeDays`. Hits charge `RESULT_CACHE_HIT_EVENT`. |
+| 2 | 0.2+ | `serve` | Move the bucket to a self-hosted S3 endpoint; old bucket as read fallback for one TTL. Index stays in Postgres. |
+
+## Decisions
+
+| # | Decision | Why |
+| --- | --- | --- |
+| 1 | Same shape as `apify-free-tier`: public repo, pinned tarball, raw httpx PostgREST client, RPC-only surface, RLS on with zero policies, env-var configuration, inert when unset. | Proven across 47 Actors; one install checklist for both. |
+| 2 | Same project and the same `SUPABASE_URL` / `SUPABASE_KEY` as the limiter, with an optional `RESULT_CACHE_INDEX_*` override. | No new secrets on 47 Actors; the override lets the index move without touching them. |
+| 3 | Modes `off` / `keys` / `serve`; absent means inert with one log line. | Safe to install fleet-wide; silence would be indistinguishable from "not installed". |
+| 4 | `key(fields)` is generic; per-source normalisers (`youtube.py`) own the field cleaning. | Normalisation drift between Phase 0 and Phase 1 would make the measurement meaningless. A golden-hash test pins the YouTube wire contract. |
+| 5 | Store the upstream artifact, not the dataset row. | One cached payload serves every output-format combination; row fields are computed on the way out. |
+| 6 | Payloads never in Postgres; S3 protocol from day one. | A payload cache fills the plan's disk in days and pushes compute up the ladder; an index of ~150 B/row does not. S3 makes Phase 2 an endpoint change. |
+| 7 | `log()` is sync and O(1); one background flush in flight; batches of 50, RPC cap 500, queue cap 5,000. | The per-request hot path must never wait on the network. |
+| 8 | A failed log batch is dropped, never re-queued. | A read timeout can fire after the server committed; re-sending would count keys twice and bias the hit rate upward. Dropping under-counts at random, which is harmless. |
+| 9 | Warn on the first failed flush; switch off after three in a row; report drops in the close summary. | Visible on a small run, bounded on a dead index. |
+| 10 | `cache_log` refuses inserts past 4 GB of request log. | The project also carries the free-tier ledger; a runaway log must fail on itself. |
+| 11 | `cache_stats`, `cache_quota`, `cache_gc_requests` are service-role only; exclusions are parameters, not SQL literals. | The anon key ships in Actor images; the shared SQL stays namespace-agnostic. |
+| 12 | `ts`, `fetched_at`, `expires_at` are server clock. | A container with a wrong clock cannot write into the wrong window. |
+| 13 | `cache_lookup` takes `p_max_age_days int`, not an interval. | Unambiguous JSON; maps 1:1 to `maxAgeDays`. |
+| 14 | gzip level 6 with `mtime=0`; sha256 of the gzipped bytes; 16 MB decode cap. | Deterministic bytes, verifiable on read, bomb-proof. |
+| 15 | Spend cap stays on. A quota watch warns at 80% and errors at 95% of each included quota. | Over quota, uploads fail (not cached) and downloads fail (miss); no run fails. The watch makes the ceiling visible before it bites. |
+| 16 | Request log retention 180 days; payload TTL default 90, max 365. | Bounded storage for both tables; GC is a script because the bucket has no lifecycle rules. |
+
+## State machine
+
+```
+start() ── config missing / off / invalid ──> inert   (log, lookup, put, close: no-ops; key() works)
+   │
+   └── keys (or serve on 0.1) ──> active ── 3 consecutive flush failures ──> deactivated
+                                     │                                         (buffer dropped, client closed)
+                                     └── close() ──> drain (<= 5 s) ──> summary line ──> closed
+```
+
+## Buffer and flush
+
+- `log()` appends to a bounded deque. At 50 buffered rows it schedules a flush unless one
+  is already running.
+- A flush sends up to 500 rows per RPC and loops while at least 50 remain.
+- `close()` waits for the in-flight flush within the 5 s budget, then sends the remainder
+  in batches until the budget runs out. Whatever is left is counted as dropped.
+- `log()` after `close()` does nothing.
+
+## Key and payload contract (YouTube)
+
+- Key: sha256 of `{"languages":[...],"ns":"youtube-transcript","preserve_formatting":bool,"transcript_type":"any|manual|generated","translate_to":null|"xx","v":1,"video_id":"..."}`
+  with sorted keys and no whitespace. `languages` defaults to `["en"]`, order and case
+  preserved. Not in the key: `output_formats`, `include_metadata`, `include_extended_metadata`.
+- Payload (0.2): the dict `fetch_youtube_transcript()` returns, minus the derived `srt` /
+  `vtt` / `text`, plus `basic_metadata` and `cache_written_at`.
+- Not cached: list-only calls, channel listings, extended (charged) metadata, error rows,
+  failed translations.
+
+## PostgREST notes
+
+- Never overload these function names; PostgREST cannot pick between overloads.
+- `returns table` columns are OUT variables in PL/pgSQL; every function uses
+  `#variable_conflict use_column` and alias-qualified columns.
+- `returns void` answers with an empty body; the client does not parse it.
+- A new function can 404 for a few seconds after a migration while the schema cache
+  reloads.

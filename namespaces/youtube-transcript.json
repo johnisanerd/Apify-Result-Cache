@@ -1,0 +1,20 @@
+{
+  "namespace": "youtube-transcript",
+  "actor": "johnvc/YoutubeTranscripts",
+  "actor_id": "zPumutvB61fpEsglh",
+  "schema_version": 1,
+  "hit_event_default": "videoprocessed",
+  "key_fields": ["video_id", "languages", "transcript_type", "translate_to", "preserve_formatting"],
+  "exclude_entity_ids": [
+    "dQw4w9WgXcQ",
+    "p8gV_7zFN44",
+    "jNQXAC9IVRw",
+    "iG9CE55wbtY",
+    "GjnHjVaU5l8",
+    "9bZkp7q19f0",
+    "5kcaHAuGxmY",
+    "1UL8iZJD38U",
+    "s4UkCaf_scs"
+  ],
+  "exclude_reason": "Example IDs from the Actor README and its 34 published task pages. Free 'try it' traffic repeats them; that overlap is real but worthless (Apify covers free users), so they are excluded from every hit-rate figure."
+}
