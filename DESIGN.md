@@ -40,10 +40,14 @@ technical decisions.
 | 16 | Request log retention 180 days; payload TTL default 90, max 365. | Bounded storage for both tables; GC is a script because the bucket has no lifecycle rules. |
 | 17 | S3 signing implemented in the library (Signature V4 over httpx, pinned to AWS's published examples), not boto3. | boto3 adds ~90 MB and a noticeable import to every run of every Actor; three single-object calls need ~80 lines. |
 | 18 | One stable object path per key (`<ns>/<key[:2]>/<key>.json.gz`). | A key that expires and is re-fetched overwrites its own object, so the expiry job only deletes what the index says expired and no orphans accumulate. |
-| 19 | One batched lookup before the videos start; blob GET only on a hit; uploads in a background queue capped at 32 MB, one in flight. | Keeps the per-video path free of index round trips and bounds memory on runs with many misses. |
-| 20 | Each request logs exactly one outcome (`hit` / `miss` / `bypass` / `error`). | `cache_stats` counts rows as requests; one row per request keeps both the key-repetition rate and the real hit rate honest. |
+| 19 | One batched lookup before the videos start; blob GET only on a hit; uploads in a background queue capped at 32 MB (one in flight until 0.2.2, see #25). | Keeps the per-video path free of index round trips and bounds memory on runs with many misses. |
+| 20 | Each request logs exactly one outcome (`hit` / `miss` / `bypass` / `error`, and `failed` from 0.2.2, see #26). | `cache_stats` counts rows as requests; one row per request keeps both the key-repetition rate and the real hit rate honest. |
 | 21 | Storage breaker: three consecutive storage failures stop serving for the run; a missing object or a failed digest check does not count. | An outage costs at most three slow requests; a single bad object is just a miss. |
 | 22 | The run's one lookup gets a 4 s read timeout and one retry (0.2.1). | Measured 2026-09-30: lookups take 50-180 ms, with a rare spike past 2.5 s. One slow answer would otherwise turn every hit in the run into a fresh fetch; worst case the run starts ~8 s later and fetches fresh. |
+| 23 | `get_blob` serves only from the key's own object path (#18); `cache_put` accepts only that path (migration 0005). A row naming any other object is a bad row: a miss, no storage call, logged by the Actor as `error` (0.2.2). | The path is derived from the key, so an index row can only ever be served from the object written for it, whatever the row says. Every row written by 0.2.x already uses that path, so nothing stored is lost. |
+| 24 | `get_blobs()` reads every hit's object right after the lookup, 16 at a time (0.2.2). | The per-item path then never waits on storage: a 100-hit run reads its objects in one round instead of one per worker slot. |
+| 25 | Uploads run three at a time, and a key uploads once per run (0.2.2). | Objects are small, so an upload is a round trip; with one in flight a fast run with many misses still had unsent results at close. A duplicate URL in one input stored the same object twice. |
+| 26 | Outcome `failed`: a miss whose fetch ended in a permanent source error, accepted by the index from 0005 (0.2.2). | Separates "no cached copy" from "nothing to cache", so the case for caching negative results can be measured (`cache_stats.py` reports the share) before it is built. |
 
 ## State machine
 

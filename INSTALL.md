@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.2.1.tar.gz" }
+apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.2.2.tar.gz" }
 ```
 
 ```bash
@@ -100,7 +100,10 @@ Console → Actor → Source → the version → Environment variables: add
 1. Before its videos start, compute every request's key and call `lookup_many()` once.
 2. Per request, log exactly one outcome: `hit` if served from storage, `miss` if fetched
    fresh, `bypass` if the caller asked for fresh (max age 0), `error` if the entry was
-   listed but `get_blob()` returned `None` (fetch fresh).
+   listed but `get_blob()` / `get_blobs()` returned nothing for it (fetch fresh), and
+   `failed` if the fresh fetch ended in a permanent source error (nothing to cache; the
+   library records it as `miss` until `RESULT_CACHE_LOG_FAILED=1` is set on a version
+   whose index has migration 0005).
 3. On a fresh fetch, snapshot the payload before building the row and `put()` it after
    the row is pushed. Never store errors, partial results or charged add-ons.
 4. Rebuild anything derived (formats, joins) from the stored payload so a served row is

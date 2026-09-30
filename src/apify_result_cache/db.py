@@ -185,6 +185,29 @@ class CacheDB:
             raise CacheDBError("bad response")
         return result
 
+    async def cache_fragmentation(
+        self,
+        date_from: str,
+        date_to: str,
+        namespace: str,
+        exclude_user_hash: str | None = None,
+        exclude_entity_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Paid requests whose entity was also asked for under another key. Service key only."""
+        result = await self._rpc(
+            "cache_fragmentation",
+            {
+                "p_from": date_from,
+                "p_to": date_to,
+                "p_namespace": namespace,
+                "p_exclude_user_hash": exclude_user_hash,
+                "p_exclude_entity_ids": exclude_entity_ids,
+            },
+        )
+        if isinstance(result, list) and result and isinstance(result[0], dict):
+            return result[0]
+        raise CacheDBError("bad response")
+
     async def cache_expired(self, limit: int = 1000) -> list[dict[str, Any]]:
         """Expired index rows (namespace, key_hash, blob_ref), oldest first. Service key only."""
         result = await self._rpc("cache_expired", {"p_limit": int(limit)})

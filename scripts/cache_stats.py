@@ -16,6 +16,11 @@ refused by these RPCs). Put both in this repo's .env (git-ignored) or export the
     # Quota watch (warn at 80%, error at 95% of each Pro included quota)
     uv run python scripts/cache_stats.py --quota
 
+    # Key fragmentation: paid requests for a video that was also asked for under
+    # another key (a different language list). Decides whether a first-language
+    # alias is worth building. Needs migration 0005.
+    uv run python scripts/cache_stats.py --fragmentation --from 2026-10-01 --to 2026-10-14
+
 Exit code: 0 ok, 1 warning (or gate in the ask-John band), 2 error (or gate failed).
 `--exclude-user` takes the raw APIFY_USER_ID and hashes it locally; the id never
 leaves this machine.
@@ -88,19 +93,56 @@ async def run_stats(db: CacheDB, args) -> int:
     rows = await db.cache_outcomes(args.date_from, args.date_to, args.namespace,
                                    exclude_user, exclude_ids or None)
     if rows:
-        print("\nOutcomes (serve mode logs hit / miss / bypass / error; keys mode logs 'logged'):")
+        print("\nOutcomes (serve mode logs hit / miss / bypass / error / failed; keys mode logs 'logged'):")
         for paying in (True, False):
             counts = {r["outcome"]: int(r["requests"]) for r in rows if bool(r["is_paying"]) is paying}
             if not counts:
                 continue
-            served = sum(counts.get(o, 0) for o in ("hit", "miss", "bypass", "error"))
+            served = sum(counts.get(o, 0) for o in ("hit", "miss", "bypass", "error", "failed"))
             detail = ", ".join(f"{o} {n:,}" for o, n in sorted(counts.items()))
             label = "paying" if paying else "free  "
             if served:
                 print(f"  {label}: {detail}  ->  served from cache {counts.get('hit', 0) / served:.1%}")
+                failed = counts.get("failed", 0)
+                if failed:
+                    # A `failed` request fetched through proxy and stored nothing, and
+                    # a retry does it again. This share is the case for negative caching.
+                    print(f"  {label}: negative-cache candidates {failed:,} of {served:,} "
+                          f"requests ({failed / served:.1%})")
             else:
                 print(f"  {label}: {detail}")
     return code
+
+
+FRAGMENTATION_BUILD_ALIAS = 0.10
+
+
+async def run_fragmentation(db: CacheDB, args) -> int:
+    """How often one video is requested under more than one key (language lists)."""
+    ns = namespace_config(args.namespace)
+    exclude_ids = [] if args.include_examples else list(ns.get("exclude_entity_ids") or [])
+    exclude_user = user_hash(args.exclude_user) if args.exclude_user else None
+    f = await db.cache_fragmentation(args.date_from, args.date_to, args.namespace,
+                                     exclude_user, exclude_ids or None)
+    requests = int(f.get("requests") or 0)
+    entities = int(f.get("entities") or 0)
+    frag_entities = int(f.get("fragmented_entities") or 0)
+    frag_requests = int(f.get("fragmented_requests") or 0)
+    share = frag_requests / requests if requests else 0.0
+    print(f"Key fragmentation, namespace {args.namespace}, paying callers only, "
+          f"{args.date_from} to {args.date_to} (UTC, inclusive)")
+    print(f"requests                     {requests:,}")
+    print(f"distinct entities            {entities:,}")
+    print(f"entities under > 1 key       {frag_entities:,}")
+    print(f"requests on those entities   {frag_requests:,} ({share:.1%} of requests)")
+    if not requests:
+        print("\nVerdict: no paying requests in range")
+        return 1
+    if share >= FRAGMENTATION_BUILD_ALIAS:
+        print(f"\nVerdict: >= {FRAGMENTATION_BUILD_ALIAS:.0%} of requests: a first-language alias is worth building")
+        return 1
+    print(f"\nVerdict: < {FRAGMENTATION_BUILD_ALIAS:.0%} of requests: leave the key as it is")
+    return 0
 
 
 async def run_quota(db: CacheDB, plan: str) -> int:
@@ -124,6 +166,8 @@ async def main() -> int:
     ap.add_argument("--exclude-user", help="raw APIFY_USER_ID to exclude (the owner's probe runs)")
     ap.add_argument("--include-examples", action="store_true", help="do not exclude example ids")
     ap.add_argument("--quota", action="store_true", help="run the quota watch instead of the gate")
+    ap.add_argument("--fragmentation", action="store_true",
+                    help="report requests for one video under several keys instead of the gate")
     ap.add_argument("--plan", choices=("pro", "free"), default=os.getenv("RESULT_CACHE_PLAN", "pro"))
     ap.add_argument("--url", default=os.getenv("RESULT_CACHE_INDEX_URL"))
     ap.add_argument("--service-key", default=os.getenv("RESULT_CACHE_SERVICE_KEY"))
@@ -138,6 +182,8 @@ async def main() -> int:
     try:
         if args.quota:
             return await run_quota(db, args.plan)
+        if args.fragmentation:
+            return await run_fragmentation(db, args)
         return await run_stats(db, args)
     except CacheDBError as exc:
         print(f"Index call failed: {exc}", file=sys.stderr)

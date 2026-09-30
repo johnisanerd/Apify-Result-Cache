@@ -379,3 +379,127 @@ async def test_no_log_line_leaks_storage_details(actor, db, s3, serve_env, monke
     for secret in ("s3-access-value", "s3-secret-value", "storage.invalid", "supabase", "test-key-value"):
         assert secret not in text, secret
     assert "'storage_keys': 'set'" in text
+
+
+# ------------------------------------ 0.2.2: path-bound rows, prefetch, parallel deduplicated uploads
+
+
+async def test_a_row_naming_another_keys_object_is_not_served(actor, db, s3, serve_env):
+    """An index row may only ever point at its own key's object path; anything else is a bad row."""
+    cache = await start()
+    cache.put(hexkey(1), entity_id=None, payload=PAYLOAD)
+    await settle_puts(cache)
+    [put] = db.put_calls
+    swapped = CacheEntry(key_hash=hexkey(2), blob_ref=put["blob_ref"], sha256=put["sha256"],
+                         size_bytes=put["size_bytes"], fetched_at=None, schema_version=1)
+
+    assert await cache.get_blob(swapped) is None
+    assert s3.gets == []                                    # refused before any storage call
+    assert len([w for w in actor.log.warnings if "integrity check" in w]) == 1
+    assert cache.serving is True and cache.stats["storage_failures"] == 0
+    assert await cache.get_blob(entry_for(put)) == PAYLOAD  # the key's own row still serves
+
+
+async def test_get_blobs_prefetches_hits_and_skips_the_rest(actor, db, s3, serve_env):
+    cache = await start()
+    for i in (1, 2, 3):
+        cache.put(hexkey(i), entity_id=None, payload=dict(PAYLOAD, video_id=f"v{i}"))
+    await settle_puts(cache)
+    puts = {p["key_hash"]: p for p in db.put_calls}
+    good = [entry_for(puts[hexkey(1)]), entry_for(puts[hexkey(2)])]
+    bad_digest = CacheEntry(hexkey(3), puts[hexkey(3)]["blob_ref"], "b" * 64, 10, None, 1)
+    missing = CacheEntry(hexkey(4), codec.blob_ref(NS, hexkey(4)), "c" * 64, 10, None, 1)
+    swapped = CacheEntry(hexkey(5), puts[hexkey(1)]["blob_ref"], puts[hexkey(1)]["sha256"], 10, None, 1)
+
+    found = await cache.get_blobs(good + [bad_digest, missing, swapped, None])
+
+    assert sorted(found) == sorted([hexkey(1), hexkey(2)])
+    assert found[hexkey(1)]["video_id"] == "v1" and found[hexkey(2)]["video_id"] == "v2"
+    assert cache.serving is True
+    assert await cache.get_blobs([]) == {}
+
+
+async def test_get_blobs_reads_concurrently(actor, db, s3, serve_env):
+    cache = await start()
+    for i in range(6):
+        cache.put(hexkey(i), entity_id=None, payload=PAYLOAD)
+    await settle_puts(cache)
+    entries = [entry_for(p) for p in db.put_calls]
+    in_flight = peak = 0
+    real_get = s3.get_object
+
+    async def slow_get(key, *, max_bytes):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        return await real_get(key, max_bytes=max_bytes)
+
+    s3.get_object = slow_get
+
+    found = await cache.get_blobs(entries, concurrency=3)
+
+    assert len(found) == 6 and peak == 3
+
+
+async def test_duplicate_puts_upload_once(actor, db, s3, serve_env):
+    cache = await start()
+    cache.put(hexkey(1), entity_id="v", payload=PAYLOAD)
+    cache.put(hexkey(1), entity_id="v", payload=PAYLOAD)      # queued already
+    await settle_puts(cache)
+    cache.put(hexkey(1), entity_id="v", payload=PAYLOAD)      # stored already
+    await settle_puts(cache)
+
+    assert s3.puts == [codec.blob_ref(NS, hexkey(1))]
+    assert cache.stats["stored"] == 1 and cache.stats["put_deduped"] == 2
+    assert cache.stats["put_dropped"] == 0 and actor.log.warnings == []
+
+
+async def test_uploads_run_three_at_a_time(actor, db, s3, serve_env):
+    cache = await start()
+    in_flight = peak = 0
+    real_put = s3.put_object
+
+    async def slow_put(key, body, *, sha256_hex, content_type="application/gzip"):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        await real_put(key, body, sha256_hex=sha256_hex, content_type=content_type)
+
+    s3.put_object = slow_put
+    for i in range(8):
+        cache.put(hexkey(i), entity_id=None, payload=PAYLOAD)
+    await settle_puts(cache)
+
+    assert cache.stats["stored"] == 8 and len(db.put_calls) == 8
+    assert peak == cache_module._PUT_IN_FLIGHT
+
+
+async def test_failed_is_a_request_outcome_once_opted_in(actor, db, s3, serve_env, monkeypatch):
+    monkeypatch.setenv("RESULT_CACHE_LOG_FAILED", "1")
+    cache = await start()
+    cache.log(hexkey(1), "a", "hit")
+    cache.log(hexkey(2), "b", "failed")
+
+    await cache.close()
+
+    assert [r["outcome"] for r in db.log_calls[0]] == ["hit", "failed"]
+    [line] = [m for m in actor.log.infos if "from cache and stored" in m]
+    assert "served 1 of 2 request(s)" in line
+    assert actor.log.warnings == []
+
+
+async def test_failed_is_recorded_as_a_miss_until_opted_in(actor, db, s3, serve_env):
+    """An index without migration 0005 rejects a whole batch holding a `failed` row."""
+    cache = await start()
+    cache.log(hexkey(1), "a", "failed")
+    cache.log(hexkey(2), "b", "miss")
+
+    await cache.close()
+
+    assert [r["outcome"] for r in db.log_calls[0]] == ["miss", "miss"]
+    assert cache.stats["outcomes"] == {"miss": 2}
+    assert actor.log.warnings == []

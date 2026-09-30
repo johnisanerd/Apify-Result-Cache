@@ -217,6 +217,29 @@ async def test_serve_end_to_end(monkeypatch):
         found = await cache.lookup_many([key], 1)
         assert list(found) == [key]
         assert await cache.get_blob(found[key]) == payload
+
+        # A row that names another key's object is never served: the index
+        # refuses to store it (migration 0005), and if an older index still
+        # accepts it, the library refuses to read it.
+        other = cache.key({"video_id": "other"})
+        index = CacheDB(URL, KEY)
+        try:
+            try:
+                await index.cache_put(
+                    namespace=ns, key_hash=other, schema_version=1, entity_id="other",
+                    blob_ref=found[key].blob_ref, sha256=found[key].sha256,
+                    size_bytes=found[key].size_bytes, ttl_days=1,
+                    actor_id="integration-actor", is_paying=False,
+                )
+                stored_swap = True
+            except CacheDBError:
+                stored_swap = False          # 0005 applied: refused at the index
+            if stored_swap:
+                swapped = await cache.lookup_many([other], 1)
+                assert list(swapped) == [other]
+                assert await cache.get_blob(swapped[other]) is None
+        finally:
+            await index.aclose()
     finally:
         await cache.close()
         cleanup = S3Client(storage_endpoint(), "us-east-1", "result-cache", S3_ACCESS, S3_SECRET)

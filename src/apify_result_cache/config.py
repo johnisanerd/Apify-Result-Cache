@@ -14,7 +14,12 @@ from typing import Mapping
 from . import messages
 
 MODES = ("off", "keys", "serve")
-OUTCOMES = frozenset({"logged", "hit", "miss", "bypass", "expired", "error"})
+# `failed` (0.2.2): a miss whose fetch ended in a permanent source error (no
+# captions, disabled, unavailable). Counted apart from `miss` so the case for
+# caching negative results can be measured. The index accepts it from
+# migration 0005 on; an older index rejects the whole batch, so Actors only
+# log it once that migration is in.
+OUTCOMES = frozenset({"logged", "hit", "miss", "bypass", "expired", "error", "failed"})
 
 DEFAULT_TTL_DAYS = 90
 DEFAULT_S3_REGION = "us-east-1"
@@ -48,6 +53,10 @@ class Config:
     s3_secret_key: str | None
     force: bool
     debug: bool
+    # RESULT_CACHE_LOG_FAILED=1: record the `failed` outcome as such. Off, it
+    # is recorded as `miss`. Off by default because an index without migration
+    # 0005 rejects a whole batch that contains a `failed` row.
+    log_failed: bool = False
 
     @property
     def storage_configured(self) -> bool:
@@ -132,6 +141,7 @@ def resolve(env: Mapping[str, str], at_home: bool) -> Resolution:
         s3_secret_key=_optional(env, "RESULT_CACHE_S3_SECRET_KEY"),
         force=force,
         debug=env.get("RESULT_CACHE_DEBUG") == "1",
+        log_failed=env.get("RESULT_CACHE_LOG_FAILED") == "1",
     )
     return Resolution(config, None, False, tuple(notes))
 
@@ -154,6 +164,7 @@ def env_presence(env: Mapping[str, str]) -> dict[str, str]:
         "RESULT_CACHE_HIT_EVENT": shown("RESULT_CACHE_HIT_EVENT"),
         "RESULT_CACHE_FRESH_EVENT": shown("RESULT_CACHE_FRESH_EVENT"),
         "RESULT_CACHE_FORCE": shown("RESULT_CACHE_FORCE"),
+        "RESULT_CACHE_LOG_FAILED": shown("RESULT_CACHE_LOG_FAILED"),
         "index_url": present(INDEX_URL_VARS),
         "index_key": present(INDEX_KEY_VARS),
         "APIFY_USER_ID": "set" if (env.get("APIFY_USER_ID") or "").strip() else "MISSING",

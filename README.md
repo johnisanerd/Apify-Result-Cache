@@ -43,7 +43,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.2.1.tar.gz" }
+apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.2.2.tar.gz" }
 ```
 
 Then `uv lock`. The tarball form needs no `git` binary inside the Actor image.
@@ -73,10 +73,11 @@ async def main() -> None:
 | --- | --- |
 | `await ResultCache.start(namespace, schema_version, hit_event_default=, fresh_event_default=)` | Reads the environment, logs the mode or why it is inert. No network call. Never raises. |
 | `cache.key(fields)` | sha256 of the canonical JSON of `fields` plus `ns` and `v`. Works in every mode. |
-| `cache.log(key, entity_id, outcome)` | Synchronous, O(1). Call exactly once per request. Outcomes: `logged`, `hit`, `miss`, `bypass`, `expired`, `error`. |
+| `cache.log(key, entity_id, outcome)` | Synchronous, O(1). Call exactly once per request. Outcomes: `logged`, `hit`, `miss`, `bypass`, `expired`, `error`, `failed` (a miss whose fetch ended in a permanent source error; recorded as `miss` unless `RESULT_CACHE_LOG_FAILED=1`). |
 | `await cache.lookup_many(keys, max_age_days)` | Serve mode: one RPC per 100 keys, returns `{key: CacheEntry}` fetched within `max_age_days`. `{}` otherwise, on `0`, and on any failure. |
-| `await cache.get_blob(entry)` | Serve mode: the stored payload, digest-verified. `None` on any failure (treat as a miss). |
-| `cache.put(key, entity_id=..., payload=...)` | Serve mode: encodes now, uploads in the background, then indexes. Never raises. |
+| `await cache.get_blob(entry)` | Serve mode: the stored payload, digest-verified and read only from the key's own object path. `None` on any failure or on a row that names another object (treat as a miss). |
+| `await cache.get_blobs(entries)` | Serve mode: `get_blob()` for every hit at once, 16 reads in flight, keyed by `key_hash`. Call it right after `lookup_many()` so no item waits on storage. |
+| `cache.put(key, entity_id=..., payload=...)` | Serve mode: encodes now, uploads in the background (three at a time), then indexes. A key already queued or stored this run is skipped. Never raises. |
 | `await cache.close()` | Drains the log and pending uploads within a ~6 s budget, logs one summary line, never raises. |
 
 Properties: `mode` (`inert` / `keys` / `serve`), `active`, `serving`, `inert_reason`,
@@ -107,6 +108,7 @@ bakes env vars into the build image.
 | `RESULT_CACHE_S3_ACCESS_KEY` / `RESULT_CACHE_S3_SECRET_KEY` | **yes** | unset | Serve mode. S3 access keys from the cache project's storage settings. They bypass storage policies, so treat them like any server secret. |
 | `RESULT_CACHE_FORCE` | no | unset | `1` ignores the "not on the Apify platform" gate, for a local check against the real index. |
 | `RESULT_CACHE_DEBUG` | no | unset | `1` logs which variables are visible. Never prints a secret. |
+| `RESULT_CACHE_LOG_FAILED` | no | unset | `1` records the `failed` outcome as such (needs migration 0005 on the index); otherwise it is recorded as `miss`. |
 
 `APIFY_USER_ID`, `APIFY_ACTOR_ID` and `APIFY_USER_IS_PAYING` come from the platform. The
 user id is stored only as a sha256.
@@ -155,8 +157,10 @@ cap on and a quota is a ceiling, not a bill.
 `migrations/0003_result_cache.sql` creates `result_cache_requests`, `result_cache_index`
 and six functions; `migrations/0004_result_cache_serve.sql` adds `cache_outcomes` (the
 real hit rate), `cache_expired` and `cache_delete_index` (for the expiry job), all
-service-role only, and the private `result-cache` bucket. Since 0.1.1 the index lives in its own project, where this is the only
-migration. It is numbered 0003 because 0.1.0 put the tables next to the free-tier ledger's
+service-role only, and the private `result-cache` bucket; `migrations/0005_hardening_and_measurement.sql`
+(0.2.2) makes `cache_put` accept only the key's own object path, lets `cache_log` record `failed`, and adds
+`cache_fragmentation` (service-role). Since 0.1.1 the index lives in its own project, where these are the only
+migrations. It is numbered 0003 because 0.1.0 put the tables next to the free-tier ledger's
 two migrations, and that copy is still there until every install is on 0.1.1. RLS is on with zero policies and direct grants are revoked: the anon key
 can execute `cache_log`, `cache_lookup` and `cache_put` and nothing else. `cache_stats`,
 `cache_quota` and `cache_gc_requests` are service-role only.

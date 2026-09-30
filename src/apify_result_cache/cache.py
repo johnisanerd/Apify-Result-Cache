@@ -6,9 +6,10 @@ One object per run, created by `ResultCache.start()`. The Actor calls:
 
     key()          name a request (pure; works in every mode)
     lookup_many()  once, before its videos start: which keys are cached (serve)
-    get_blob()     on a hit: the stored payload, digest-verified (serve)
+    get_blobs()    right after: the stored payloads for those hits, prefetched (serve)
+    get_blob()     one entry: the stored payload, digest-verified (serve)
     put()          after a fresh fetch: store the payload (serve, fire-and-forget)
-    log()          exactly one outcome per request: logged, hit, miss, bypass, error
+    log()          exactly one outcome per request: logged, hit, miss, bypass, error, failed
     close()        in the `finally`: send what is buffered, bounded, never raises
 
 Modes, from RESULT_CACHE_MODE:
@@ -23,9 +24,10 @@ free-tier limiter earned the hard way:
 1. Absent configuration means inert. The library can be installed fleet-wide
    and switched on per Actor.
 2. The hot path never blocks. `log()` and `put()` are synchronous and cheap;
-   rows and payloads go out in the background with one request in flight each.
-   The only awaited network calls are the single lookup before the videos
-   start and the object GET on a hit.
+   rows go out in the background one batch at a time and payloads a few at a
+   time. The only awaited network calls are the single lookup before the
+   videos start and the object GETs for its hits, which `get_blobs()` runs
+   together.
 3. It fails permissive. Index down, storage down, a corrupt object: each one is
    a miss, logged once. Our infrastructure having a bad day must never break
    someone else's run.
@@ -41,7 +43,7 @@ import os
 import re
 from collections import Counter, deque
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from apify import Actor
 
@@ -68,6 +70,12 @@ _LOOKUP_ATTEMPTS = 2
 _BLOB_MAX_BYTES = 2_000_000
 # Payloads waiting to be stored, in encoded bytes. Past this, new ones are dropped.
 _PUT_QUEUE_BYTES = 32 * 1024 * 1024
+# Uploads in flight at once. Objects are small (median ~11 KB), so an upload
+# costs its round trip; a run with many misses would otherwise still be
+# uploading when it closes and drop the rest.
+_PUT_IN_FLIGHT = 3
+# Object GETs in flight at once for get_blobs().
+_PREFETCH_CONCURRENCY = 16
 
 _NAMESPACE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -125,8 +133,10 @@ class ResultCache:
         self._put_queue: deque[tuple[str, str | None, bytes, str, int]] = deque()
         self._put_bytes = 0
         self._put_task: asyncio.Task[None] | None = None
+        self._put_seen: set[str] = set()      # keys queued or stored this run
         self._stored = 0
         self._put_dropped = 0
+        self._put_deduped = 0
 
     # ------------------------------------------------------------------ start
 
@@ -279,6 +289,7 @@ class ResultCache:
             "outcomes": dict(self._outcomes),
             "stored": self._stored,
             "put_dropped": self._put_dropped,
+            "put_deduped": self._put_deduped,
             "queued_puts": len(self._put_queue),
             "storage_failures": self._storage_failures,
         }
@@ -316,6 +327,11 @@ class ResultCache:
         if outcome not in config.OUTCOMES:
             self._warn_once(f"outcome:{outcome!r}", messages.bad_outcome(outcome))
             return
+        if outcome == "failed" and not self._config.log_failed:
+            # The index accepts `failed` from migration 0005 on, and an older
+            # index would reject the whole batch. Opt in per version once the
+            # migration is in; until then a failed fetch is recorded as a miss.
+            outcome = "miss"
         if not isinstance(key, str) or not _HEX64_RE.match(key):
             # One malformed row would get the whole batch rejected server-side.
             self._warn_once("bad_key", messages.bad_key(key))
@@ -382,8 +398,17 @@ class ResultCache:
         return found
 
     async def get_blob(self, entry: CacheEntry | None) -> dict[str, Any] | None:
-        """The payload behind an index entry, digest-verified. None on any failure."""
+        """The payload behind an index entry, digest-verified. None on any failure.
+
+        Serves only from the key's own object path (`codec.blob_ref`): an
+        index row that names any other object is treated as a bad row and is
+        a miss, without a storage call. The path is derived from the key, so
+        a row can only ever be served from the object that was written for it.
+        """
         if not self.serving or self._s3 is None or not isinstance(entry, CacheEntry):
+            return None
+        if entry.blob_ref != codec.blob_ref(self._namespace, entry.key_hash):
+            self._warn_once("blob_ref", messages.blob_rejected("unexpected object path"))
             return None
         try:
             blob = await self._s3.get_object(entry.blob_ref, max_bytes=_BLOB_MAX_BYTES)
@@ -401,16 +426,44 @@ class ResultCache:
             self._warn_once("corrupt", messages.blob_rejected(str(exc)))
             return None
 
+    async def get_blobs(self, entries: Iterable[CacheEntry | None], *,
+                        concurrency: int = _PREFETCH_CONCURRENCY) -> dict[str, dict[str, Any]]:
+        """`get_blob()` for many entries at once, keyed by `key_hash`.
+
+        Meant to run right after `lookup_many()`, so the per-item path never
+        waits on storage. An entry that fails, is missing, or is rejected is
+        simply absent from the result (a miss for the caller).
+        """
+        wanted = [e for e in entries if isinstance(e, CacheEntry)]
+        if not wanted or not self.serving:
+            return {}
+        limit = asyncio.Semaphore(max(1, int(concurrency)))
+
+        async def one(entry: CacheEntry) -> tuple[str, dict[str, Any] | None]:
+            async with limit:
+                return entry.key_hash, await self.get_blob(entry)
+
+        found: dict[str, dict[str, Any]] = {}
+        for item in await asyncio.gather(*(one(e) for e in wanted), return_exceptions=True):
+            if isinstance(item, tuple) and item[1] is not None:
+                found[item[0]] = item[1]
+        return found
+
     def put(self, key: str, *, entity_id: str | None, payload: Mapping[str, Any]) -> None:
         """Store a fresh payload under `key`. Synchronous and fire-and-forget; never raises.
 
         The payload is encoded now (so later changes to the caller's dicts
-        cannot leak in) and uploaded in the background.
+        cannot leak in) and uploaded in the background. A key already queued
+        or stored this run is skipped: the same request twice in one run (a
+        duplicate URL) uploads once.
         """
         if not self.serving:
             return
         if not isinstance(key, str) or not _HEX64_RE.match(key):
             self._warn_once("bad_key", messages.bad_key(key))
+            return
+        if key in self._put_seen:
+            self._put_deduped += 1
             return
         try:
             blob, sha, size = codec.encode(dict(payload))
@@ -429,6 +482,7 @@ class ResultCache:
         self._put_queue.append((key, None if entity_id is None else str(entity_id)[:_ENTITY_ID_MAX],
                                 blob, sha, size))
         self._put_bytes += size
+        self._put_seen.add(key)
         self._schedule_puts()
 
     def _schedule_puts(self) -> None:
@@ -441,6 +495,11 @@ class ResultCache:
         self._put_task = loop.create_task(self._put_worker())
 
     async def _put_worker(self) -> None:
+        """One task that runs up to `_PUT_IN_FLIGHT` uploaders over the shared queue."""
+        await asyncio.gather(*(self._put_loop() for _ in range(_PUT_IN_FLIGHT)),
+                             return_exceptions=True)
+
+    async def _put_loop(self) -> None:
         while self._put_queue and self._serving and self._s3 is not None and self._db is not None:
             item = self._put_queue.popleft()
             self._put_bytes -= item[4]
@@ -609,7 +668,7 @@ class ResultCache:
         if self._mode == "inert" or not (self._recorded or self._stored):
             return
         if self._serve_started:
-            requests = sum(self._outcomes[o] for o in ("hit", "miss", "bypass", "error"))
+            requests = sum(self._outcomes[o] for o in ("hit", "miss", "bypass", "error", "failed"))
             Actor.log.info(messages.serve_summary(
                 self._outcomes["hit"], requests, self._stored,
                 self._recorded, self._flushed, self._dropped,

@@ -185,7 +185,7 @@ def keys_env(monkeypatch):
     monkeypatch.setenv("APIFY_USER_ID", "user-1")
     monkeypatch.setenv("APIFY_ACTOR_ID", "actor-1")
     monkeypatch.setenv("APIFY_USER_IS_PAYING", "0")
-    for name in ("RESULT_CACHE_FORCE", "RESULT_CACHE_DEBUG", "RESULT_CACHE_TTL_DAYS",
+    for name in ("RESULT_CACHE_FORCE", "RESULT_CACHE_DEBUG", "RESULT_CACHE_TTL_DAYS", "RESULT_CACHE_LOG_FAILED",
                  "RESULT_CACHE_HIT_EVENT"):
         monkeypatch.delenv(name, raising=False)
 
