@@ -82,7 +82,24 @@ async def run_stats(db: CacheDB, args) -> int:
     print(f"hit rate, same user {fmt_rate(s['hit_rate_same_user_only'])}")
     print(f"first / last        {s['first_ts']} / {s['last_ts']}")
     text, code = verdict(s["hit_rate_any_user"])
-    print(f"\nGate: {text}")
+    print(f"\nKey repetition gate: {text}")
+
+    # Once the cache serves, this is the number that matters: what was actually served.
+    rows = await db.cache_outcomes(args.date_from, args.date_to, args.namespace,
+                                   exclude_user, exclude_ids or None)
+    if rows:
+        print("\nOutcomes (serve mode logs hit / miss / bypass / error; keys mode logs 'logged'):")
+        for paying in (True, False):
+            counts = {r["outcome"]: int(r["requests"]) for r in rows if bool(r["is_paying"]) is paying}
+            if not counts:
+                continue
+            served = sum(counts.get(o, 0) for o in ("hit", "miss", "bypass", "error"))
+            detail = ", ".join(f"{o} {n:,}" for o, n in sorted(counts.items()))
+            label = "paying" if paying else "free  "
+            if served:
+                print(f"  {label}: {detail}  ->  served from cache {counts.get('hit', 0) / served:.1%}")
+            else:
+                print(f"  {label}: {detail}")
     return code
 
 

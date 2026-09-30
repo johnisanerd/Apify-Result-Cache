@@ -65,15 +65,22 @@ def mode_keys() -> str:
     )
 
 
-def mode_serve() -> str:
-    return f"{_PREFIX} mode serve. Repeat requests may be served from cache."
-
-
-def serve_not_available(version: str) -> str:
+def mode_serve(ttl_days: int) -> str:
     return (
-        f"{_PREFIX} mode serve is not available in version {version}; "
-        "running as keys (recording only)."
+        f"{_PREFIX} mode serve. Repeat requests may be served from cache; new results "
+        f"are kept for {ttl_days} days."
     )
+
+
+def storage_not_configured() -> str:
+    return (
+        f"{_PREFIX} mode serve needs storage settings (RESULT_CACHE_S3_ENDPOINT, "
+        "RESULT_CACHE_S3_ACCESS_KEY, RESULT_CACHE_S3_SECRET_KEY); recording keys only."
+    )
+
+
+def storage_endpoint_invalid() -> str:
+    return f"{_PREFIX} RESULT_CACHE_S3_ENDPOINT is not an http(s) URL; recording keys only."
 
 
 # ----------------------------------------------------------------- permissive
@@ -84,6 +91,29 @@ def unavailable(reason: str) -> str:
         f"{_PREFIX} recording unavailable ({reason}); continuing without it. "
         "This run's results are unaffected."
     )
+
+
+def storage_unavailable(reason: str) -> str:
+    return (
+        f"{_PREFIX} storage unavailable ({reason}); fetching fresh instead. "
+        "This run's results are unaffected."
+    )
+
+
+def lookup_unavailable(reason: str) -> str:
+    return f"{_PREFIX} lookup unavailable ({reason}); fetching fresh instead."
+
+
+def blob_rejected(reason: str) -> str:
+    return f"{_PREFIX} a stored result failed its integrity check ({reason}); fetching fresh instead."
+
+
+def store_skipped(reason: str) -> str:
+    return f"{_PREFIX} a result was not stored ({reason})."
+
+
+def index_write_failed(reason: str) -> str:
+    return f"{_PREFIX} a stored result could not be indexed ({reason}); it will be fetched fresh next time."
 
 
 def queue_full(cap: int) -> str:
@@ -114,6 +144,16 @@ def bad_ttl(raw: str, default: int) -> str:
 
 def close_summary(recorded: int, flushed: int, dropped: int) -> str:
     line = f"{_PREFIX} recorded {flushed} of {recorded} request key(s) this run."
+    if dropped:
+        line += f" ({dropped} not recorded.)"
+    return line
+
+
+def serve_summary(served: int, requests: int, stored: int, recorded: int, flushed: int, dropped: int) -> str:
+    line = (
+        f"{_PREFIX} served {served} of {requests} request(s) from cache and stored "
+        f"{stored} new result(s); recorded {flushed} of {recorded} request key(s)."
+    )
     if dropped:
         line += f" ({dropped} not recorded.)"
     return line

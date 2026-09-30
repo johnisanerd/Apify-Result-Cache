@@ -12,7 +12,6 @@ import hashlib
 import hmac
 import json
 import zlib
-from datetime import datetime
 from typing import Any
 
 
@@ -32,15 +31,28 @@ def canonical_json(obj: Any) -> bytes:
         raise CodecError(f"not JSON-serialisable ({type(exc).__name__})") from None
 
 
+def payload_json(obj: Any) -> bytes:
+    """Compact UTF-8 JSON that keeps the caller's key order, nested dicts included.
+
+    Unlike `canonical_json` (which sorts, because a key must be stable), a
+    stored payload keeps its order so a served result reads exactly like the
+    fresh one: same field order in the row, same column order in a CSV export.
+    """
+    try:
+        return json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise CodecError(f"not JSON-serialisable ({type(exc).__name__})") from None
+
+
 def encode(payload: dict[str, Any]) -> tuple[bytes, str, int]:
     """Returns (blob, sha256 hex of the blob, size in bytes).
 
-    `mtime=0` makes the gzip header deterministic, so the same payload always
-    produces the same bytes and the same digest.
+    `mtime=0` makes the gzip header deterministic, so the same payload (same
+    keys in the same order) always produces the same bytes and digest.
     """
     if not isinstance(payload, dict):
         raise CodecError("payload must be a dict")
-    blob = gzip.compress(canonical_json(payload), compresslevel=COMPRESS_LEVEL, mtime=0)
+    blob = gzip.compress(payload_json(payload), compresslevel=COMPRESS_LEVEL, mtime=0)
     return blob, hashlib.sha256(blob).hexdigest(), len(blob)
 
 
@@ -71,6 +83,11 @@ def decode(blob: bytes, expected_sha256: str) -> dict[str, Any]:
     return obj
 
 
-def blob_ref(namespace: str, key_hash: str, when: datetime) -> str:
-    """Object path in the bucket. Month-prefixed so expiry deletes stay cheap."""
-    return f"{namespace}/{when:%Y}/{when:%m}/{key_hash}.json.gz"
+def blob_ref(namespace: str, key_hash: str) -> str:
+    """Object path in the bucket: one stable path per key, sharded by the first two hex characters.
+
+    Stable on purpose: a key that expires and is fetched again overwrites its
+    own object instead of leaving an orphan behind, so the expiry job only
+    ever has to delete what the index says has expired.
+    """
+    return f"{namespace}/{key_hash[:2]}/{key_hash}.json.gz"

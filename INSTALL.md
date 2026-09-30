@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.1.1.tar.gz" }
+apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.2.0.tar.gz" }
 ```
 
 ```bash
@@ -86,11 +86,26 @@ Console → Actor → Source → the version → Environment variables: add
 
 | Variable | Secret | Value |
 | --- | --- | --- |
-| `RESULT_CACHE_MODE` | no | `keys` |
+| `RESULT_CACHE_MODE` | no | `keys` to measure, `serve` to serve |
 | `RESULT_CACHE_INDEX_URL` | no | the cache project's API URL |
 | `RESULT_CACHE_INDEX_KEY` | **yes** | the cache project's publishable key |
+| `RESULT_CACHE_S3_ENDPOINT` | no | serve only: `https://<ref>.storage.supabase.co/storage/v1/s3` |
+| `RESULT_CACHE_S3_ACCESS_KEY` | **yes** | serve only: S3 access key id from the project's storage settings |
+| `RESULT_CACHE_S3_SECRET_KEY` | **yes** | serve only: its secret |
 
 **Rebuild.** Env vars reach the Actor only through a new build.
+
+### Serving: what the Actor must do
+
+1. Before its videos start, compute every request's key and call `lookup_many()` once.
+2. Per request, log exactly one outcome: `hit` if served from storage, `miss` if fetched
+   fresh, `bypass` if the caller asked for fresh (max age 0), `error` if the entry was
+   listed but `get_blob()` returned `None` (fetch fresh).
+3. On a fresh fetch, snapshot the payload before building the row and `put()` it after
+   the row is pushed. Never store errors, partial results or charged add-ons.
+4. Rebuild anything derived (formats, joins) from the stored payload so a served row is
+   identical to a fresh one; the codec keeps key order for exactly this reason.
+5. Add `cached` / `fetched_at` (and `cache_age_days` on hits) to every row in serve mode.
 
 ## 5. Verify
 

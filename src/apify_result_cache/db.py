@@ -151,6 +151,48 @@ class CacheDB:
         except (TypeError, ValueError):
             raise CacheDBError("bad response") from None
 
+    async def cache_outcomes(
+        self,
+        date_from: str,
+        date_to: str,
+        namespace: str,
+        exclude_user_hash: str | None = None,
+        exclude_entity_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Request counts by (is_paying, outcome): the real hit rate once serving. Service key only."""
+        result = await self._rpc(
+            "cache_outcomes",
+            {
+                "p_from": date_from,
+                "p_to": date_to,
+                "p_namespace": namespace,
+                "p_exclude_user_hash": exclude_user_hash,
+                "p_exclude_entity_ids": exclude_entity_ids,
+            },
+        )
+        if result is None:
+            return []
+        if not isinstance(result, list):
+            raise CacheDBError("bad response")
+        return result
+
+    async def cache_expired(self, limit: int = 1000) -> list[dict[str, Any]]:
+        """Expired index rows (namespace, key_hash, blob_ref), oldest first. Service key only."""
+        result = await self._rpc("cache_expired", {"p_limit": int(limit)})
+        if result is None:
+            return []
+        if not isinstance(result, list):
+            raise CacheDBError("bad response")
+        return result
+
+    async def cache_delete_index(self, namespace: str, keys: list[str]) -> int:
+        """Delete index rows that are already expired. Service key only."""
+        result = await self._rpc("cache_delete_index", {"p_namespace": namespace, "p_keys": list(keys)})
+        try:
+            return int(result or 0)
+        except (TypeError, ValueError):
+            raise CacheDBError("bad response") from None
+
     async def aclose(self) -> None:
         try:
             await self._client.aclose()

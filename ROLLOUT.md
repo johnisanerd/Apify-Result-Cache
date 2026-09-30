@@ -4,7 +4,7 @@ Which Actors have the result cache installed, in which mode, and what each insta
 
 | Actor | Actor ID | Namespace | Mode | Library | Since | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| `johnvc/YoutubeTranscripts` | `zPumutvB61fpEsglh` | `youtube-transcript` | pending | v0.1.1 | — | Phase 0 pilot. Gate: 14 days of `keys`, then `scripts/cache_stats.py`. |
+| `johnvc/YoutubeTranscripts` | `zPumutvB61fpEsglh` | `youtube-transcript` | keys on 0.5 once the Phase 0 PR merges; serve with the Phase 1 PR | v0.1.1 → v0.2.0 | 2026-09-30 | Pilot. Serving (hits charge `videoprocessed`; `max_age_days`, default 90). |
 | `youtube-shorts-api` | `I4jjsTkELEeJKK8o3` | `youtube-shorts`, `youtube-shorts-channel` | keys (seen 2026-09-30) | v0.1.0 | 2026-09-30 | Installed from another session. On 0.1.0 it writes to the free-tier ledger's project; moving to 0.1.1 needs the two index variables. |
 
 ## Project

@@ -12,6 +12,7 @@ key cannot delete, so purge afterwards from the SQL editor:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import uuid
@@ -153,3 +154,71 @@ async def test_stats_with_the_service_key(ns):
     finally:
         await anon.aclose()
         await service.aclose()
+
+
+# ------------------------------------------------------------------ storage (serve)
+# Needs the S3 access keys too (RESULT_CACHE_S3_ACCESS_KEY / _SECRET_KEY). The
+# endpoint defaults to the index project's storage host.
+
+S3_ACCESS = os.getenv("RESULT_CACHE_S3_ACCESS_KEY")
+S3_SECRET = os.getenv("RESULT_CACHE_S3_SECRET_KEY")
+needs_storage = pytest.mark.skipif(not (S3_ACCESS and S3_SECRET), reason="S3 keys not set")
+
+
+def storage_endpoint() -> str:
+    if os.getenv("RESULT_CACHE_S3_ENDPOINT"):
+        return os.environ["RESULT_CACHE_S3_ENDPOINT"]
+    ref = URL.split("//", 1)[1].split(".", 1)[0]
+    return f"https://{ref}.storage.supabase.co/storage/v1/s3"
+
+
+@needs_storage
+async def test_storage_roundtrip():
+    from apify_result_cache.s3 import S3Client, S3Error
+
+    client = S3Client(storage_endpoint(), os.getenv("RESULT_CACHE_S3_REGION", "us-east-1"),
+                      os.getenv("RESULT_CACHE_S3_BUCKET", "result-cache"), S3_ACCESS, S3_SECRET)
+    key = f"test-{uuid.uuid4()}/probe.json.gz"
+    body = b"\x1f\x8b" + os.urandom(64)
+    try:
+        await client.put_object(key, body, sha256_hex=hashlib.sha256(body).hexdigest())
+        assert await client.get_object(key, max_bytes=1000) == body
+        await client.delete_object(key)
+        with pytest.raises(S3Error, match="NotFound"):
+            await client.get_object(key, max_bytes=1000)
+    finally:
+        await client.delete_object(key)
+        await client.aclose()
+
+
+@needs_storage
+async def test_serve_end_to_end(monkeypatch):
+    """put -> lookup -> get_blob through the real index and the real bucket."""
+    from apify_result_cache import ResultCache, codec
+    from apify_result_cache.s3 import S3Client
+
+    ns = f"test-{uuid.uuid4()}"
+    for name, value in {
+        "RESULT_CACHE_MODE": "serve", "RESULT_CACHE_FORCE": "1",
+        "RESULT_CACHE_INDEX_URL": URL, "RESULT_CACHE_INDEX_KEY": KEY,
+        "RESULT_CACHE_S3_ENDPOINT": storage_endpoint(),
+        "RESULT_CACHE_S3_ACCESS_KEY": S3_ACCESS, "RESULT_CACHE_S3_SECRET_KEY": S3_SECRET,
+        "APIFY_USER_ID": "integration-user", "APIFY_ACTOR_ID": "integration-actor",
+    }.items():
+        monkeypatch.setenv(name, value)
+    cache = await ResultCache.start(namespace=ns, schema_version=1)
+    assert cache.serving
+    payload = {"video_id": "vid", "timestamped": [{"text": "hello", "start": 0.0, "duration": 1.0}]}
+    key = cache.key({"video_id": "vid"})
+    try:
+        cache.put(key, entity_id="vid", payload=payload)
+        await asyncio.gather(cache._put_task, return_exceptions=True)
+        assert cache.stats["stored"] == 1
+        found = await cache.lookup_many([key], 1)
+        assert list(found) == [key]
+        assert await cache.get_blob(found[key]) == payload
+    finally:
+        await cache.close()
+        cleanup = S3Client(storage_endpoint(), "us-east-1", "result-cache", S3_ACCESS, S3_SECRET)
+        await cleanup.delete_object(codec.blob_ref(ns, key))
+        await cleanup.aclose()

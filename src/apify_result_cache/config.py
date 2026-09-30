@@ -17,6 +17,8 @@ MODES = ("off", "keys", "serve")
 OUTCOMES = frozenset({"logged", "hit", "miss", "bypass", "expired", "error"})
 
 DEFAULT_TTL_DAYS = 90
+DEFAULT_S3_REGION = "us-east-1"
+DEFAULT_S3_BUCKET = "result-cache"
 MIN_TTL_DAYS = 1
 MAX_TTL_DAYS = 365
 
@@ -38,13 +40,18 @@ class Config:
     is_paying: bool
     ttl_days: int
     hit_event: str | None         # None: the Actor's own default applies
-    s3_endpoint: str | None       # Phase 1; parsed now, unused in 0.1
-    s3_region: str | None
-    s3_bucket: str | None
+    fresh_event: str | None       # None: the Actor's own default applies
+    s3_endpoint: str | None       # serve mode stores payloads here
+    s3_region: str
+    s3_bucket: str
     s3_access_key: str | None
     s3_secret_key: str | None
     force: bool
     debug: bool
+
+    @property
+    def storage_configured(self) -> bool:
+        return bool(self.s3_endpoint and self.s3_access_key and self.s3_secret_key)
 
 
 @dataclass(frozen=True)
@@ -117,9 +124,10 @@ def resolve(env: Mapping[str, str], at_home: bool) -> Resolution:
         is_paying=env.get("APIFY_USER_IS_PAYING") == "1",
         ttl_days=ttl_days,
         hit_event=_optional(env, "RESULT_CACHE_HIT_EVENT"),
+        fresh_event=_optional(env, "RESULT_CACHE_FRESH_EVENT"),
         s3_endpoint=_optional(env, "RESULT_CACHE_S3_ENDPOINT"),
-        s3_region=_optional(env, "RESULT_CACHE_S3_REGION"),
-        s3_bucket=_optional(env, "RESULT_CACHE_S3_BUCKET"),
+        s3_region=_optional(env, "RESULT_CACHE_S3_REGION") or DEFAULT_S3_REGION,
+        s3_bucket=_optional(env, "RESULT_CACHE_S3_BUCKET") or DEFAULT_S3_BUCKET,
         s3_access_key=_optional(env, "RESULT_CACHE_S3_ACCESS_KEY"),
         s3_secret_key=_optional(env, "RESULT_CACHE_S3_SECRET_KEY"),
         force=force,
@@ -144,14 +152,16 @@ def env_presence(env: Mapping[str, str]) -> dict[str, str]:
         "RESULT_CACHE_MODE": shown("RESULT_CACHE_MODE"),
         "RESULT_CACHE_TTL_DAYS": shown("RESULT_CACHE_TTL_DAYS"),
         "RESULT_CACHE_HIT_EVENT": shown("RESULT_CACHE_HIT_EVENT"),
+        "RESULT_CACHE_FRESH_EVENT": shown("RESULT_CACHE_FRESH_EVENT"),
         "RESULT_CACHE_FORCE": shown("RESULT_CACHE_FORCE"),
         "index_url": present(INDEX_URL_VARS),
         "index_key": present(INDEX_KEY_VARS),
         "APIFY_USER_ID": "set" if (env.get("APIFY_USER_ID") or "").strip() else "MISSING",
         "APIFY_ACTOR_ID": "set" if (env.get("APIFY_ACTOR_ID") or "").strip() else "MISSING",
         "APIFY_USER_IS_PAYING": shown("APIFY_USER_IS_PAYING"),
-        "s3_endpoint": "set" if _optional(env, "RESULT_CACHE_S3_ENDPOINT") else "MISSING",
-        "s3_bucket": shown("RESULT_CACHE_S3_BUCKET"),
-        "s3_keys": "set" if (_optional(env, "RESULT_CACHE_S3_ACCESS_KEY")
-                            and _optional(env, "RESULT_CACHE_S3_SECRET_KEY")) else "MISSING",
+        "storage_endpoint": "set" if _optional(env, "RESULT_CACHE_S3_ENDPOINT") else "MISSING",
+        "storage_region": _optional(env, "RESULT_CACHE_S3_REGION") or f"default ({DEFAULT_S3_REGION})",
+        "storage_bucket": _optional(env, "RESULT_CACHE_S3_BUCKET") or f"default ({DEFAULT_S3_BUCKET})",
+        "storage_keys": "set" if (_optional(env, "RESULT_CACHE_S3_ACCESS_KEY")
+                                 and _optional(env, "RESULT_CACHE_S3_SECRET_KEY")) else "MISSING",
     }

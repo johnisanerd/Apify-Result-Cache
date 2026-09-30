@@ -5,19 +5,24 @@
     uv run python scripts/cache_gc.py                        # prune the request log past 180 days, print the quota report
     uv run python scripts/cache_gc.py --dry-run              # say what it would do
 
-What it does today (0.1):
+What it does:
   1. Request-log retention: deletes result_cache_requests rows older than
      --log-retention-days (default 180), in batches, via cache_gc_requests().
      The function refuses anything younger than 7 days.
-  2. Prints the quota watch, same as `cache_stats.py --quota`.
+  2. Expired payloads (needs the S3 keys): lists index rows past their
+     expiry, deletes each object from the bucket, then deletes those index
+     rows. Object first, row second, so a crash leaves a row that points at
+     nothing (a harmless miss), never an object that costs storage forever.
+     The bucket has no lifecycle rules; this is the only thing that frees
+     space. cache_delete_index() only ever removes rows that are still
+     expired, so a key re-stored meanwhile keeps its row (at worst its new
+     object was deleted, which heals itself on the next miss).
+  3. Prints the quota watch, same as `cache_stats.py --quota`.
 
-What it will do in 0.2 (Phase 1, needs the S3 keys):
-  3. Expired payloads: select index rows with expires_at < now(), delete their
-     blobs from the bucket (month-prefixed paths make whole-month prefixes
-     cheap to list), then delete the index rows. Blob first, row second, so a
-     crash leaves an orphan row that points at nothing (a harmless miss), never
-     an orphan blob that costs storage forever. The bucket has no lifecycle
-     rules; this script is the only thing that frees space.
+Storage settings come from the same variables the Actors use:
+RESULT_CACHE_S3_ENDPOINT (default: the index project's storage host),
+RESULT_CACHE_S3_REGION (default us-east-1), RESULT_CACHE_S3_BUCKET (default
+result-cache), RESULT_CACHE_S3_ACCESS_KEY and RESULT_CACHE_S3_SECRET_KEY.
 """
 
 from __future__ import annotations
@@ -31,8 +36,58 @@ from datetime import datetime, timedelta, timezone
 from _common import load_env_file, quota_report
 
 from apify_result_cache.db import CacheDB, CacheDBError
+from apify_result_cache.s3 import S3Client, S3Error
 
 MIN_RETENTION_DAYS = 14   # never prune inside a measurement window
+
+
+def storage_client(index_url: str) -> S3Client | None:
+    access, secret = os.getenv("RESULT_CACHE_S3_ACCESS_KEY"), os.getenv("RESULT_CACHE_S3_SECRET_KEY")
+    if not (access and secret):
+        return None
+    endpoint = os.getenv("RESULT_CACHE_S3_ENDPOINT")
+    if not endpoint:
+        ref = index_url.split("//", 1)[1].split(".", 1)[0]
+        endpoint = f"https://{ref}.storage.supabase.co/storage/v1/s3"
+    return S3Client(endpoint, os.getenv("RESULT_CACHE_S3_REGION", "us-east-1"),
+                    os.getenv("RESULT_CACHE_S3_BUCKET", "result-cache"), access, secret)
+
+
+async def expire_payloads(db: CacheDB, args) -> None:
+    s3 = storage_client(args.url)
+    if s3 is None:
+        print("Payload expiry: skipped (RESULT_CACHE_S3_ACCESS_KEY / _SECRET_KEY not set).\n")
+        return
+    deleted_objects = deleted_rows = failures = 0
+    try:
+        for _ in range(args.max_batches):
+            rows = await db.cache_expired(1000)
+            if not rows:
+                break
+            if args.dry_run:
+                print(f"Payload expiry: {len(rows)}+ expired result(s) would be deleted (dry run).")
+                break
+            by_namespace: dict[str, list[str]] = {}
+            for row in rows:
+                try:
+                    await s3.delete_object(row["blob_ref"])
+                    deleted_objects += 1
+                    by_namespace.setdefault(row["namespace"], []).append(row["key_hash"])
+                except S3Error as exc:
+                    failures += 1
+                    if failures <= 3:
+                        print(f"  object delete failed: {exc}", file=sys.stderr)
+            for namespace, keys in by_namespace.items():
+                deleted_rows += await db.cache_delete_index(namespace, keys)
+            if failures and not deleted_objects:
+                break
+            if len(rows) < 1000:
+                break
+    finally:
+        await s3.aclose()
+    if not args.dry_run:
+        print(f"Payload expiry: deleted {deleted_objects:,} object(s) and {deleted_rows:,} index row(s)"
+              + (f"; {failures} object delete(s) failed" if failures else "") + ".\n")
 
 
 async def main() -> int:
@@ -72,7 +127,7 @@ async def main() -> int:
                     break
             print(f"  deleted {total:,} row(s).")
 
-        print("Payload expiry: not in 0.1 (Phase 1 adds blob + index deletion).\n")
+        await expire_payloads(db, args)
 
         lines, code = quota_report(await db.cache_quota(), args.plan)
         print(f"Quota watch ({args.plan} plan, spend cap on; WARN 80%, ERROR 95%)")

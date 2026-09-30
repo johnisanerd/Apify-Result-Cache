@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import gzip
+import json
 import hashlib
-from datetime import datetime, timezone
-
 import pytest
 
 from apify_result_cache import CodecError
@@ -22,10 +21,22 @@ def test_roundtrip():
     assert codec.decode(blob, sha) == PAYLOAD
 
 
-def test_deterministic_regardless_of_key_order():
-    a = codec.encode({"b": 1, "a": [1, 2]})
-    b = codec.encode({"a": [1, 2], "b": 1})
-    assert a == b
+def test_deterministic_for_the_same_payload():
+    assert codec.encode({"b": 1, "a": [1, 2]}) == codec.encode({"b": 1, "a": [1, 2]})
+
+
+def test_key_order_is_preserved_through_a_roundtrip():
+    """A served result must read exactly like the fresh one, nested dicts included."""
+    payload = {"video_id": "v", "timestamped": [{"text": "t", "start": 1.0, "duration": 2.0}], "a": 1}
+    blob, sha, _ = codec.encode(payload)
+    decoded = codec.decode(blob, sha)
+    assert list(decoded) == ["video_id", "timestamped", "a"]
+    assert list(decoded["timestamped"][0]) == ["text", "start", "duration"]
+    assert json.dumps(decoded) == json.dumps(payload)
+
+
+def test_keys_still_hash_sorted():
+    assert codec.canonical_json({"b": 1, "a": 2}) == codec.canonical_json({"a": 2, "b": 1})
 
 
 def test_sha_mismatch_is_rejected():
@@ -70,9 +81,10 @@ def test_payload_must_be_a_dict():
         codec.encode([1, 2])  # type: ignore[arg-type]
 
 
-def test_blob_ref_layout():
-    ref = codec.blob_ref("youtube-transcript", "ab" * 32, datetime(2026, 10, 5, tzinfo=timezone.utc))
-    assert ref == "youtube-transcript/2026/10/" + "ab" * 32 + ".json.gz"
+def test_blob_ref_layout_is_stable_per_key():
+    key = "cd" + "ab" * 31
+    assert codec.blob_ref("youtube-transcript", key) == f"youtube-transcript/cd/{key}.json.gz"
+    assert codec.blob_ref("youtube-transcript", key) == codec.blob_ref("youtube-transcript", key)
 
 
 def test_non_ascii_survives():

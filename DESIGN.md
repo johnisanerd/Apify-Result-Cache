@@ -34,10 +34,15 @@ technical decisions.
 | 10 | `cache_log` refuses inserts past 4 GB of request log. | With the spend cap on, the disk stays at the included 8 GB and a full disk makes the project read-only. The stop leaves room for the Phase 1 index. |
 | 11 | `cache_stats`, `cache_quota`, `cache_gc_requests` are service-role only; exclusions are parameters, not SQL literals. | The anon key ships in Actor images; the shared SQL stays namespace-agnostic. |
 | 12 | `ts`, `fetched_at`, `expires_at` are server clock. | A container with a wrong clock cannot write into the wrong window. |
-| 13 | `cache_lookup` takes `p_max_age_days int`, not an interval. | Unambiguous JSON; maps 1:1 to `maxAgeDays`. |
-| 14 | gzip level 6 with `mtime=0`; sha256 of the gzipped bytes; 16 MB decode cap. | Deterministic bytes, verifiable on read, bomb-proof. |
+| 13 | `cache_lookup` takes `p_max_age_days int`, not an interval. | Unambiguous JSON; maps 1:1 to the Actor's max-age input. |
+| 14 | gzip level 6 with `mtime=0`; sha256 of the gzipped bytes; 16 MB decode cap. Payload JSON keeps the caller's key order (keys still hash sorted). | Verifiable on read and bomb-proof, and a served row reads exactly like a fresh one, down to CSV column order. |
 | 15 | Spend cap stays on. A quota watch warns at 80% and errors at 95% of each included quota. | Over quota, uploads fail (not cached) and downloads fail (miss); no run fails. The watch makes the ceiling visible before it bites. |
 | 16 | Request log retention 180 days; payload TTL default 90, max 365. | Bounded storage for both tables; GC is a script because the bucket has no lifecycle rules. |
+| 17 | S3 signing implemented in the library (Signature V4 over httpx, pinned to AWS's published examples), not boto3. | boto3 adds ~90 MB and a noticeable import to every run of every Actor; three single-object calls need ~80 lines. |
+| 18 | One stable object path per key (`<ns>/<key[:2]>/<key>.json.gz`). | A key that expires and is re-fetched overwrites its own object, so the expiry job only deletes what the index says expired and no orphans accumulate. |
+| 19 | One batched lookup before the videos start; blob GET only on a hit; uploads in a background queue capped at 32 MB, one in flight. | Keeps the per-video path free of index round trips and bounds memory on runs with many misses. |
+| 20 | Each request logs exactly one outcome (`hit` / `miss` / `bypass` / `error`). | `cache_stats` counts rows as requests; one row per request keeps both the key-repetition rate and the real hit rate honest. |
+| 21 | Storage breaker: three consecutive storage failures stop serving for the run; a missing object or a failed digest check does not count. | An outage costs at most three slow requests; a single bad object is just a miss. |
 
 ## State machine
 

@@ -134,7 +134,8 @@ async def test_missing_identity_warns(actor, db, keys_env, monkeypatch):
     assert any("identity" in w for w in actor.log.warnings)
 
 
-async def test_serve_mode_runs_as_keys_with_one_warning(actor, db, keys_env, monkeypatch):
+async def test_serve_without_storage_records_keys_with_one_warning(actor, db, keys_env, monkeypatch):
+    """Setting serve before the storage keys exist must not switch measurement off."""
     monkeypatch.setenv("RESULT_CACHE_MODE", "serve")
 
     cache = await start()
@@ -142,10 +143,9 @@ async def test_serve_mode_runs_as_keys_with_one_warning(actor, db, keys_env, mon
     await cache.close()
 
     assert cache.mode == "serve"
-    assert cache.active is False  # closed
-    assert len([w for w in actor.log.warnings if "not available" in w]) == 1
-    assert db.log_calls == [[db.log_calls[0][0]]]
-    assert db.log_calls[0][0]["key_hash"] == hexkey(1)
+    assert cache.serving is False
+    assert len([w for w in actor.log.warnings if "needs storage settings" in w]) == 1
+    assert [r["key_hash"] for r in db.log_calls[0]] == [hexkey(1)]
 
 
 async def test_bad_namespace_is_inert_without_raising(actor, db, keys_env):
@@ -400,7 +400,9 @@ async def test_flush_failure_is_dropped_with_one_warning(actor, db, keys_env):
         cache.log(hexkey(i), None, "logged")
     await settle(cache)
 
-    assert cache.stats == {"recorded": 50, "flushed": 0, "dropped": 50, "failures": 1, "buffered": 0}
+    stats = cache.stats
+    assert (stats["recorded"], stats["flushed"], stats["dropped"], stats["failures"], stats["buffered"]) \
+        == (50, 0, 50, 1, 0)
     assert cache.active is True
     [warning] = [w for w in actor.log.warnings if "continuing without it" in w]
     assert "ConnectError" in warning

@@ -13,6 +13,7 @@ import pytest
 
 from apify_result_cache import cache as cache_module
 from apify_result_cache.db import CacheDBError
+from apify_result_cache.s3 import S3Error
 
 
 class FakeLog:
@@ -69,6 +70,9 @@ class FakeDB:
         self.gate: asyncio.Event | None = None
         self.constructed = 0
         self.url = ""
+        self.lookup_rows: list[dict] = []
+        self.lookup_fail = False
+        self.put_fail = False
 
     async def cache_log(self, rows: list[dict]) -> int:
         if self.gate is not None:
@@ -82,13 +86,67 @@ class FakeDB:
 
     async def cache_lookup(self, namespace, keys, max_age_days):
         self.lookup_calls.append((namespace, list(keys), max_age_days))
-        return []
+        if self.lookup_fail:
+            raise CacheDBError("HTTP 503")
+        return [row for row in self.lookup_rows if row["key_hash"] in keys]
 
     async def cache_put(self, **fields) -> None:
+        if self.put_fail:
+            raise CacheDBError("HTTP 500")
         self.put_calls.append(fields)
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class FakeS3:
+    """An in-memory bucket with the S3Client surface. Records every call."""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+        self.puts: list[str] = []
+        self.gets: list[str] = []
+        self.fail_put = False
+        self.fail_get = False
+        self.hang = False
+        self.closed = False
+        self.init_args: tuple | None = None
+
+    async def put_object(self, key, body, *, sha256_hex, content_type="application/gzip"):
+        if self.hang:
+            await asyncio.Event().wait()
+        if self.fail_put:
+            raise S3Error("HTTP 503")
+        self.puts.append(key)
+        self.objects[key] = bytes(body)
+
+    async def get_object(self, key, *, max_bytes):
+        self.gets.append(key)
+        if self.fail_get:
+            raise S3Error("ConnectError")
+        if key not in self.objects:
+            raise S3Error("NotFound")
+        return self.objects[key]
+
+    async def delete_object(self, key):
+        self.objects.pop(key, None)
+
+    async def aclose(self):
+        self.closed = True
+
+
+@pytest.fixture
+def s3(monkeypatch):
+    fake = FakeS3()
+
+    def factory(endpoint, region, bucket, access_key, secret_key, **kwargs):
+        if not str(endpoint).startswith(("http://", "https://")):
+            raise ValueError("storage endpoint must be an http(s) URL")
+        fake.init_args = (endpoint, region, bucket)
+        return fake
+
+    monkeypatch.setattr(cache_module, "S3Client", factory)
+    return fake
 
 
 @pytest.fixture
@@ -132,3 +190,14 @@ def keys_env(monkeypatch):
 def fast_close(monkeypatch):
     """Shrink the close budget so hang tests do not sleep for 5 s."""
     monkeypatch.setattr(cache_module, "_CLOSE_BUDGET_S", 0.2)
+
+
+@pytest.fixture
+def serve_env(keys_env, monkeypatch):
+    """keys_env, switched to serve mode with storage configured."""
+    monkeypatch.setenv("RESULT_CACHE_MODE", "serve")
+    monkeypatch.setenv("RESULT_CACHE_S3_ENDPOINT", "https://storage.invalid/storage/v1/s3")
+    monkeypatch.setenv("RESULT_CACHE_S3_ACCESS_KEY", "s3-access-value")
+    monkeypatch.setenv("RESULT_CACHE_S3_SECRET_KEY", "s3-secret-value")
+    for name in ("RESULT_CACHE_S3_REGION", "RESULT_CACHE_S3_BUCKET", "RESULT_CACHE_FRESH_EVENT"):
+        monkeypatch.delenv(name, raising=False)
