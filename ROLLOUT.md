@@ -14,7 +14,9 @@ Which Actors have the result cache installed, in which mode, and what each insta
   install is on 0.1.1.
 - Plan: Pro with the spend cap **on**. Quota watch: `scripts/cache_stats.py --quota`, weekly (needs
   `RESULT_CACHE_SERVICE_KEY` in the local `.env`).
-- Measured 2026-09-30: `cache_lookup` 50-180 ms (1 or 100 keys); stored transcripts 0.9-20 KB gzipped.
+- Measured 2026-09-30: `cache_lookup` 50-180 ms (1 or 100 keys). YoutubeTranscripts, 25 videos on the side
+  version: platform cost $0.00112 per fresh video vs $0.000026 per cached video (~43x; the difference is
+  residential proxy). Warmed with 377 known video IDs: 294 cached, 14 MB gzipped (mean 48 KB, max 598 KB).
 
 ## Timers
 
