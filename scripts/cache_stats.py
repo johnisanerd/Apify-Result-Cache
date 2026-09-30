@@ -7,8 +7,9 @@ refused by these RPCs). Put both in this repo's .env (git-ignored) or export the
     RESULT_CACHE_INDEX_URL=...        # the cache's own project
     RESULT_CACHE_SERVICE_KEY=...      # its service role / secret key, never shipped in an Actor
 
-    # The Phase 0 gate: paying callers, example IDs excluded, John's own runs excluded
+    # Served rate and outcomes: paying callers, example IDs excluded, John's own runs excluded
     uv run python scripts/cache_stats.py --from 2026-10-01 --to 2026-10-14 --exclude-user <APIFY_USER_ID>
+    # Add --phase0-gate for the Phase 0 key-repetition verdict (a namespace still in keys mode)
 
     # The same, one line per day, to see the trend
     uv run python scripts/cache_stats.py --from 2026-10-01 --to 2026-10-14 --daily
@@ -21,7 +22,7 @@ refused by these RPCs). Put both in this repo's .env (git-ignored) or export the
     # alias is worth building. Needs migration 0005.
     uv run python scripts/cache_stats.py --fragmentation --from 2026-10-01 --to 2026-10-14
 
-Exit code: 0 ok, 1 warning (or gate in the ask-John band), 2 error (or gate failed).
+Exit code: 0 ok, 1 warning (quota, or the gate in the ask-John band with --phase0-gate), 2 error (quota, or gate failed).
 `--exclude-user` takes the raw APIFY_USER_ID and hashes it locally; the id never
 leaves this machine.
 """
@@ -86,8 +87,12 @@ async def run_stats(db: CacheDB, args) -> int:
     print(f"hit rate, any user  {fmt_rate(s['hit_rate_any_user'])}")
     print(f"hit rate, same user {fmt_rate(s['hit_rate_same_user_only'])}")
     print(f"first / last        {s['first_ts']} / {s['last_ts']}")
-    text, code = verdict(s["hit_rate_any_user"])
-    print(f"\nKey repetition gate: {text}")
+    code = 0
+    if args.phase0_gate:
+        # The Phase 0 measurement gate (paid key-repetition rate). Historical:
+        # serving went live on 2026-09-30 without it; kept for other namespaces.
+        text, code = verdict(s["hit_rate_any_user"])
+        print(f"\nKey repetition gate: {text}")
 
     # Once the cache serves, this is the number that matters: what was actually served.
     rows = await db.cache_outcomes(args.date_from, args.date_to, args.namespace,
@@ -163,6 +168,8 @@ async def main() -> int:
     ap.add_argument("--from", dest="date_from", default=(today - timedelta(days=13)).isoformat())
     ap.add_argument("--to", dest="date_to", default=today.isoformat())
     ap.add_argument("--daily", action="store_true", help="also print one line per day")
+    ap.add_argument("--phase0-gate", action="store_true",
+                    help="also print the Phase 0 key-repetition gate verdict (PASS / ASK / STOP)")
     ap.add_argument("--exclude-user", help="raw APIFY_USER_ID to exclude (the owner's probe runs)")
     ap.add_argument("--include-examples", action="store_true", help="do not exclude example ids")
     ap.add_argument("--quota", action="store_true", help="run the quota watch instead of the gate")

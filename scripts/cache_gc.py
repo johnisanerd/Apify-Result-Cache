@@ -60,9 +60,11 @@ async def expire_payloads(db: CacheDB, args) -> None:
         return
     deleted_objects = deleted_rows = failures = 0
     try:
-        for _ in range(args.max_batches):
+        for batch in range(args.max_batches):
             rows = await db.cache_expired(1000)
             if not rows:
+                if batch == 0:
+                    print("Payload expiry: nothing has expired yet; no objects or index rows to delete.\n")
                 break
             if args.dry_run:
                 print(f"Payload expiry: {len(rows)}+ expired result(s) would be deleted (dry run).")
