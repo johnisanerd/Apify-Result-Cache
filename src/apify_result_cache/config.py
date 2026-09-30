@@ -20,12 +20,12 @@ DEFAULT_TTL_DAYS = 90
 MIN_TTL_DAYS = 1
 MAX_TTL_DAYS = 365
 
-# The index lives in the same project as the free-tier ledger, so by default it
-# uses the two names already baked into every Actor. The RESULT_CACHE_INDEX_*
-# override exists so the cache can move to its own project one day without
-# touching those Actors. Nothing sets it today.
-INDEX_URL_VARS = ("RESULT_CACHE_INDEX_URL", "SUPABASE_URL")
-INDEX_KEY_VARS = ("RESULT_CACHE_INDEX_KEY", "SUPABASE_KEY")
+# The index has its own project and its own two variables. There is deliberately
+# no fallback to SUPABASE_URL / SUPABASE_KEY: those belong to the free-tier
+# limiter, whose project also holds a copy of the cache tables from 0.1.0, so a
+# fallback would quietly log to the wrong database whenever these were missing.
+INDEX_URL_VARS = ("RESULT_CACHE_INDEX_URL",)
+INDEX_KEY_VARS = ("RESULT_CACHE_INDEX_KEY",)
 
 
 @dataclass(frozen=True)

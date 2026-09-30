@@ -1,7 +1,7 @@
 """Opt-in tests against the real index project.
 
-    SUPABASE_URL=... SUPABASE_KEY=<anon key> uv run pytest tests/test_integration.py
-    (add SUPABASE_SERVICE_KEY=... to exercise cache_stats and cache_quota)
+    RESULT_CACHE_INDEX_URL=... RESULT_CACHE_INDEX_KEY=<publishable key> uv run pytest tests/test_integration.py
+    (add RESULT_CACHE_SERVICE_KEY=... to exercise cache_stats and cache_quota)
 
 Every test uses a throwaway namespace so it never touches real rows. The anon
 key cannot delete, so purge afterwards from the SQL editor:
@@ -21,11 +21,12 @@ import pytest
 
 from apify_result_cache.db import CacheDB, CacheDBError
 
-URL = os.getenv("SUPABASE_URL")
-KEY = os.getenv("SUPABASE_KEY")
-SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+URL = os.getenv("RESULT_CACHE_INDEX_URL")
+KEY = os.getenv("RESULT_CACHE_INDEX_KEY")
+SERVICE_KEY = os.getenv("RESULT_CACHE_SERVICE_KEY")
 
-pytestmark = pytest.mark.skipif(not (URL and KEY), reason="SUPABASE_URL / SUPABASE_KEY not set")
+pytestmark = pytest.mark.skipif(not (URL and KEY),
+                                reason="RESULT_CACHE_INDEX_URL / RESULT_CACHE_INDEX_KEY not set")
 
 
 def h(s: str) -> str:
@@ -130,7 +131,7 @@ async def test_stats_is_refused_to_the_anon_key(db):
         await db.cache_stats("2026-01-01", "2026-01-02", "youtube-transcript")
 
 
-@pytest.mark.skipif(not SERVICE_KEY, reason="SUPABASE_SERVICE_KEY not set")
+@pytest.mark.skipif(not SERVICE_KEY, reason="RESULT_CACHE_SERVICE_KEY not set")
 async def test_stats_with_the_service_key(ns):
     anon = CacheDB(URL, KEY)
     service = CacheDB(URL, SERVICE_KEY)

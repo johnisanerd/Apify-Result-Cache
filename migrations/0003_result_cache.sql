@@ -3,7 +3,11 @@
 -- in Postgres; they go to an S3-compatible bucket and the index holds the
 -- reference, the digest and the expiry.
 --
--- Security model, same as 0001: the anon key rides in every Actor's
+-- Numbered 0003 because 0.1.0 put these tables next to the free-tier
+-- ledger's 0001/0002. Since 0.1.1 the index has its own project, where this is
+-- the only migration.
+--
+-- Security model, same as the ledger's: the anon key rides in every Actor's
 -- environment and must be assumed public. RLS is on with ZERO policies and
 -- direct grants are revoked, so the key cannot touch the tables at all. The
 -- only reachable surface is the SECURITY DEFINER functions below, each of
@@ -85,9 +89,9 @@ begin
         raise exception 'too many rows (max 500)';
     end if;
 
-    -- Breaker. The project is shared with the free-tier ledger; a runaway log
-    -- must fail on itself, never fill the disk under the limiter. 4 GB is
-    -- half of the Pro plan's included disk.
+    -- Breaker. With the spend cap on, the disk cannot grow past the plan's
+    -- included 8 GB, and a full disk puts the whole project in read-only
+    -- mode. Stopping the log at 4 GB leaves room for the Phase 1 index.
     if pg_total_relation_size('public.result_cache_requests') > 4::bigint * 1024 * 1024 * 1024 then
         raise exception 'request log is full';
     end if;

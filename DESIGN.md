@@ -23,7 +23,7 @@ technical decisions.
 | # | Decision | Why |
 | --- | --- | --- |
 | 1 | Same shape as `apify-free-tier`: public repo, pinned tarball, raw httpx PostgREST client, RPC-only surface, RLS on with zero policies, env-var configuration, inert when unset. | Proven across 47 Actors; one install checklist for both. |
-| 2 | Same project and the same `SUPABASE_URL` / `SUPABASE_KEY` as the limiter, with an optional `RESULT_CACHE_INDEX_*` override. | No new secrets on 47 Actors; the override lets the index move without touching them. |
+| 2 | Own project (`apify-result-cache`, Pro org, us-east-1) read only through `RESULT_CACHE_INDEX_URL` / `RESULT_CACHE_INDEX_KEY`. No fallback to the limiter's `SUPABASE_URL` / `SUPABASE_KEY`. | John's call on 2026-09-30 (0.1.1): keeps the fleet-critical limiter isolated from the cache, for about $10/month of compute. 0.1.0 shared the limiter's project, which still holds a copy of the tables, so a fallback would silently log to the wrong database. |
 | 3 | Modes `off` / `keys` / `serve`; absent means inert with one log line. | Safe to install fleet-wide; silence would be indistinguishable from "not installed". |
 | 4 | `key(fields)` is generic; per-source normalisers (`youtube.py`) own the field cleaning. | Normalisation drift between Phase 0 and Phase 1 would make the measurement meaningless. A golden-hash test pins the YouTube wire contract. |
 | 5 | Store the upstream artifact, not the dataset row. | One cached payload serves every output-format combination; row fields are computed on the way out. |
@@ -31,7 +31,7 @@ technical decisions.
 | 7 | `log()` is sync and O(1); one background flush in flight; batches of 50, RPC cap 500, queue cap 5,000. | The per-request hot path must never wait on the network. |
 | 8 | A failed log batch is dropped, never re-queued. | A read timeout can fire after the server committed; re-sending would count keys twice and bias the hit rate upward. Dropping under-counts at random, which is harmless. |
 | 9 | Warn on the first failed flush; switch off after three in a row; report drops in the close summary. | Visible on a small run, bounded on a dead index. |
-| 10 | `cache_log` refuses inserts past 4 GB of request log. | The project also carries the free-tier ledger; a runaway log must fail on itself. |
+| 10 | `cache_log` refuses inserts past 4 GB of request log. | With the spend cap on, the disk stays at the included 8 GB and a full disk makes the project read-only. The stop leaves room for the Phase 1 index. |
 | 11 | `cache_stats`, `cache_quota`, `cache_gc_requests` are service-role only; exclusions are parameters, not SQL literals. | The anon key ships in Actor images; the shared SQL stays namespace-agnostic. |
 | 12 | `ts`, `fetched_at`, `expires_at` are server clock. | A container with a wrong clock cannot write into the wrong window. |
 | 13 | `cache_lookup` takes `p_max_age_days int`, not an interval. | Unambiguous JSON; maps 1:1 to `maxAgeDays`. |

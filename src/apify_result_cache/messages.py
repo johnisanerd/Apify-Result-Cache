@@ -32,7 +32,7 @@ def reason_off_platform() -> str:
 
 
 def reason_not_configured() -> str:
-    return "not configured"
+    return "not configured: set RESULT_CACHE_INDEX_URL and RESULT_CACHE_INDEX_KEY"
 
 
 def reason_no_identity() -> str:

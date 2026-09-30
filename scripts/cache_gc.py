@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Garbage collection for the result cache. Run monthly, or from the 1 AM crontab.
 
-    export SUPABASE_URL=... SUPABASE_SERVICE_KEY=...
+    RESULT_CACHE_INDEX_URL=... RESULT_CACHE_SERVICE_KEY=...   # in .env or exported
     uv run python scripts/cache_gc.py                        # prune the request log past 180 days, print the quota report
     uv run python scripts/cache_gc.py --dry-run              # say what it would do
 
@@ -44,12 +44,13 @@ async def main() -> int:
     ap.add_argument("--max-batches", type=int, default=200)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--plan", choices=("pro", "free"), default=os.getenv("RESULT_CACHE_PLAN", "pro"))
-    ap.add_argument("--url", default=os.getenv("RESULT_CACHE_INDEX_URL") or os.getenv("SUPABASE_URL"))
-    ap.add_argument("--service-key", default=os.getenv("SUPABASE_SERVICE_KEY"))
+    ap.add_argument("--url", default=os.getenv("RESULT_CACHE_INDEX_URL"))
+    ap.add_argument("--service-key", default=os.getenv("RESULT_CACHE_SERVICE_KEY"))
     args = ap.parse_args()
 
     if not args.url or not args.service_key:
-        print("Set SUPABASE_URL and SUPABASE_SERVICE_KEY (service role).", file=sys.stderr)
+        print("Set RESULT_CACHE_INDEX_URL and RESULT_CACHE_SERVICE_KEY (the index project's service key).",
+              file=sys.stderr)
         return 2
     if args.log_retention_days < MIN_RETENTION_DAYS:
         print(f"--log-retention-days must be >= {MIN_RETENTION_DAYS}.", file=sys.stderr)

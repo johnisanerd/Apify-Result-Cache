@@ -115,13 +115,16 @@ def db(monkeypatch):
 def keys_env(monkeypatch):
     """A configured Actor in keys mode, run by a free user."""
     monkeypatch.setenv("RESULT_CACHE_MODE", "keys")
-    monkeypatch.setenv("SUPABASE_URL", "https://example.invalid")
-    monkeypatch.setenv("SUPABASE_KEY", "test-key-value")
+    monkeypatch.setenv("RESULT_CACHE_INDEX_URL", "https://example.invalid")
+    monkeypatch.setenv("RESULT_CACHE_INDEX_KEY", "test-key-value")
+    # The limiter's variables are present on every fleet Actor; the cache must ignore them.
+    monkeypatch.setenv("SUPABASE_URL", "https://limiter.invalid")
+    monkeypatch.setenv("SUPABASE_KEY", "limiter-key-value")
     monkeypatch.setenv("APIFY_USER_ID", "user-1")
     monkeypatch.setenv("APIFY_ACTOR_ID", "actor-1")
     monkeypatch.setenv("APIFY_USER_IS_PAYING", "0")
     for name in ("RESULT_CACHE_FORCE", "RESULT_CACHE_DEBUG", "RESULT_CACHE_TTL_DAYS",
-                 "RESULT_CACHE_HIT_EVENT", "RESULT_CACHE_INDEX_URL", "RESULT_CACHE_INDEX_KEY"):
+                 "RESULT_CACHE_HIT_EVENT"):
         monkeypatch.delenv(name, raising=False)
 
 

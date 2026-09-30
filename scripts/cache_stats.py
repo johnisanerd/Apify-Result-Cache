@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Hit-rate gate and quota watch for the result cache.
 
-Needs the service key (the anon key in Actor images is refused by these RPCs):
+Needs the index project's service key (the publishable key in Actor images is
+refused by these RPCs). Put both in this repo's .env (git-ignored) or export them:
 
-    export SUPABASE_URL=...           # the index project
-    export SUPABASE_SERVICE_KEY=...   # service role, never shipped in an Actor
+    RESULT_CACHE_INDEX_URL=...        # the cache's own project
+    RESULT_CACHE_SERVICE_KEY=...      # its service role / secret key, never shipped in an Actor
 
     # The Phase 0 gate: paying callers, example IDs excluded, John's own runs excluded
     uv run python scripts/cache_stats.py --from 2026-10-01 --to 2026-10-14 --exclude-user <APIFY_USER_ID>
@@ -107,12 +108,13 @@ async def main() -> int:
     ap.add_argument("--include-examples", action="store_true", help="do not exclude example ids")
     ap.add_argument("--quota", action="store_true", help="run the quota watch instead of the gate")
     ap.add_argument("--plan", choices=("pro", "free"), default=os.getenv("RESULT_CACHE_PLAN", "pro"))
-    ap.add_argument("--url", default=os.getenv("RESULT_CACHE_INDEX_URL") or os.getenv("SUPABASE_URL"))
-    ap.add_argument("--service-key", default=os.getenv("SUPABASE_SERVICE_KEY"))
+    ap.add_argument("--url", default=os.getenv("RESULT_CACHE_INDEX_URL"))
+    ap.add_argument("--service-key", default=os.getenv("RESULT_CACHE_SERVICE_KEY"))
     args = ap.parse_args()
 
     if not args.url or not args.service_key:
-        print("Set SUPABASE_URL and SUPABASE_SERVICE_KEY (service role).", file=sys.stderr)
+        print("Set RESULT_CACHE_INDEX_URL and RESULT_CACHE_SERVICE_KEY (the index project's service key).",
+              file=sys.stderr)
         return 2
 
     db = CacheDB(args.url, args.service_key, read_timeout=30.0)

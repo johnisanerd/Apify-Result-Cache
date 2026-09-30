@@ -95,22 +95,34 @@ async def test_force_overrides_the_platform_gate(actor, db, keys_env, monkeypatc
 
 
 async def test_missing_index_config_warns(actor, db, keys_env, monkeypatch):
-    monkeypatch.delenv("SUPABASE_KEY")
+    monkeypatch.delenv("RESULT_CACHE_INDEX_KEY")
 
     cache = await start()
 
     assert cache.mode == "inert"
-    assert any("not configured" in w for w in actor.log.warnings)
+    assert any("not configured" in w and "RESULT_CACHE_INDEX_KEY" in w for w in actor.log.warnings)
+    assert db.constructed == 0
 
 
-async def test_index_override_takes_precedence(actor, db, keys_env, monkeypatch):
-    monkeypatch.setenv("RESULT_CACHE_INDEX_URL", "https://override.invalid/")
-    monkeypatch.setenv("RESULT_CACHE_INDEX_KEY", "override-key")
+async def test_limiter_variables_are_never_used_as_the_index(actor, db, keys_env, monkeypatch):
+    """SUPABASE_URL/KEY point at the limiter's project, which also holds 0.1.0's
+    copy of the cache tables. Falling back to them would log to the wrong place."""
+    monkeypatch.delenv("RESULT_CACHE_INDEX_URL")
+    monkeypatch.delenv("RESULT_CACHE_INDEX_KEY")
+
+    cache = await start()
+
+    assert cache.mode == "inert"
+    assert db.constructed == 0
+
+
+async def test_uses_the_index_address(actor, db, keys_env, monkeypatch):
+    monkeypatch.setenv("RESULT_CACHE_INDEX_URL", "https://index.invalid/")
 
     cache = await start()
 
     assert cache.active is True
-    assert db.url == "https://override.invalid"
+    assert db.url == "https://index.invalid"
 
 
 async def test_missing_identity_warns(actor, db, keys_env, monkeypatch):
@@ -508,13 +520,15 @@ async def test_no_log_line_leaks_the_backend_or_the_key(actor, db, keys_env, mon
     text = "\n".join(actor.log.lines).lower()
     assert "supabase" not in text
     assert "example.invalid" not in text
+    assert "limiter.invalid" not in text
     assert "test-key-value" not in text
+    assert "limiter-key-value" not in text
     assert "index_key': 'set'" in text or "'index_key': 'set'" in text
 
 
 async def test_debug_dump_reports_presence_only(actor, db, keys_env, monkeypatch):
     monkeypatch.setenv("RESULT_CACHE_DEBUG", "1")
-    monkeypatch.delenv("SUPABASE_KEY")
+    monkeypatch.delenv("RESULT_CACHE_INDEX_KEY")
 
     await start()
 

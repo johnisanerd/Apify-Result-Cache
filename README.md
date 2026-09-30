@@ -40,7 +40,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.1.0.tar.gz" }
+apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.1.1.tar.gz" }
 ```
 
 Then `uv lock`. The tarball form needs no `git` binary inside the Actor image.
@@ -97,8 +97,7 @@ bakes env vars into the build image.
 | `RESULT_CACHE_MODE` | no | none (inert) | `off`, `keys` (record only), `serve` (0.2; runs as `keys` on 0.1). |
 | `RESULT_CACHE_TTL_DAYS` | no | `90` | Expiry for cached payloads (1-365). |
 | `RESULT_CACHE_HIT_EVENT` | no | the Actor's default | Pay-per-event name to charge on a hit. |
-| `SUPABASE_URL` / `SUPABASE_KEY` | key yes | none | The index project. Same names and anon key as the free-tier limiter. |
-| `RESULT_CACHE_INDEX_URL` / `RESULT_CACHE_INDEX_KEY` | key yes | unset | Optional override, if the index ever moves to its own project. |
+| `RESULT_CACHE_INDEX_URL` / `RESULT_CACHE_INDEX_KEY` | key yes | none | The cache's own project: its API URL and publishable key. Required whenever a mode is set. The free-tier limiter's `SUPABASE_URL` / `SUPABASE_KEY` are never used. |
 | `RESULT_CACHE_S3_ENDPOINT` / `_REGION` / `_BUCKET` | no | unset | 0.2. |
 | `RESULT_CACHE_S3_ACCESS_KEY` / `_SECRET_KEY` | yes | unset | 0.2. |
 | `RESULT_CACHE_FORCE` | no | unset | `1` ignores the "not on the Apify platform" gate, for a local check against the real index. |
@@ -129,7 +128,8 @@ the run continues with its normal output:
 
 ## Operator scripts
 
-Both need the service key (`SUPABASE_SERVICE_KEY`); the anon key cannot read aggregates.
+Both need the index project's URL and service key (`RESULT_CACHE_INDEX_URL`, `RESULT_CACHE_SERVICE_KEY`), in this
+repo's git-ignored `.env` or exported. The publishable key in Actor images cannot read aggregates.
 
 ```bash
 uv run python scripts/cache_stats.py --from 2026-10-01 --to 2026-10-14 --exclude-user <APIFY_USER_ID>
@@ -145,8 +145,9 @@ cap on and a quota is a ceiling, not a bill.
 ## Database
 
 `migrations/0003_result_cache.sql` creates `result_cache_requests`, `result_cache_index`
-and six functions. Numbered after the limiter's two migrations because both live in the
-same project. RLS is on with zero policies and direct grants are revoked: the anon key
+and six functions. Since 0.1.1 the index lives in its own project, where this is the only
+migration. It is numbered 0003 because 0.1.0 put the tables next to the free-tier ledger's
+two migrations, and that copy is still there until every install is on 0.1.1. RLS is on with zero policies and direct grants are revoked: the anon key
 can execute `cache_log`, `cache_lookup` and `cache_put` and nothing else. `cache_stats`,
 `cache_quota` and `cache_gc_requests` are service-role only.
 
@@ -164,7 +165,7 @@ uv sync --extra dev && uv run pytest
 Integration tests against a real project are opt-in and use a throwaway namespace:
 
 ```bash
-SUPABASE_URL=... SUPABASE_KEY=... SUPABASE_SERVICE_KEY=... uv run pytest tests/test_integration.py
+RESULT_CACHE_INDEX_URL=... RESULT_CACHE_INDEX_KEY=... RESULT_CACHE_SERVICE_KEY=... uv run pytest tests/test_integration.py
 ```
 
 The anon key cannot delete, so purge test rows afterwards from the SQL editor:
