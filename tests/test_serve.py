@@ -153,7 +153,8 @@ async def test_a_failed_lookup_is_a_miss_with_one_warning(actor, db, s3, serve_e
     assert await cache.lookup_many([hexkey(1)], 90) == {}
     assert await cache.lookup_many([hexkey(2)], 90) == {}
     assert len(db.lookup_calls) == 4                      # each lookup tried twice
-    assert len([w for w in actor.log.warnings if "lookup unavailable" in w]) == 1
+    assert len([w for w in actor.log.infos if "lookup unavailable" in w]) == 1
+    assert actor.log.warnings == []
 
 
 async def test_one_slow_lookup_is_retried(actor, db, s3, serve_env):
@@ -242,7 +243,7 @@ async def test_a_tampered_object_is_rejected(actor, db, s3, serve_env):
     s3.objects[ref] = bytes(blob)
 
     assert await cache.get_blob(entry_for(db.put_calls[0])) is None
-    assert len([w for w in actor.log.warnings if "integrity check" in w]) == 1
+    assert len([w for w in actor.log.infos if "being replaced" in w]) == 1
     assert cache.serving is True
 
 
@@ -269,7 +270,8 @@ async def test_three_storage_failures_stop_serving_with_one_warning(actor, db, s
     assert cache.serving is False
     assert cache.active is True                         # keys are still recorded
     assert await cache.lookup_many([hexkey(1)], 90) == {}
-    assert len([w for w in actor.log.warnings if "storage unavailable" in w]) == 1
+    assert len([w for w in actor.log.infos if "storage unavailable" in w]) == 1
+    assert actor.log.warnings == []
     assert s3.puts == []
 
 
@@ -295,7 +297,8 @@ async def test_an_index_write_failure_leaves_a_future_miss(actor, db, s3, serve_
     await settle_puts(cache)
 
     assert cache.stats["stored"] == 0 and cache.stats["put_dropped"] == 2
-    assert len([w for w in actor.log.warnings if "could not be indexed" in w]) == 1
+    assert len([w for w in actor.log.infos if "could not be indexed" in w]) == 1
+    assert actor.log.warnings == []
     assert cache.serving is True
 
 
@@ -525,3 +528,22 @@ async def test_failed_is_recorded_as_a_miss_until_opted_in(actor, db, s3, serve_
     assert [r["outcome"] for r in db.log_calls[0]] == ["miss", "miss"]
     assert cache.stats["outcomes"] == {"miss": 2}
     assert actor.log.warnings == []
+
+
+async def test_an_index_write_is_retried_once(actor, db, s3, serve_env):
+    db.put_fail_times = 1
+    cache = await start()
+
+    cache.put(hexkey(1), entity_id=None, payload=PAYLOAD)
+    await settle_puts(cache)
+
+    assert cache.stats["stored"] == 1 and cache.stats["put_dropped"] == 0
+    assert not any("could not be indexed" in line for line in actor.log.lines)
+
+
+async def test_the_mode_line_names_what_is_cached(actor, db, s3, serve_env):
+    await cache_module.ResultCache.start("li-serp", 1, ttl_days=1, label="search results")
+    await cache_module.ResultCache.start("li-profile", 1, ttl_days=7, label="profiles")
+
+    assert any("on for search results" in i and "kept for 1 day." in i for i in actor.log.infos)
+    assert any("on for profiles" in i and "kept for 7 days." in i for i in actor.log.infos)

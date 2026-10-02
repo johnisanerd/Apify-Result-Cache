@@ -66,6 +66,8 @@ _MAX_DRAIN_CALLS = 10
 # cache_lookup() accepts at most this many keys per call; each call gets one retry.
 _LOOKUP_CHUNK = 100
 _LOOKUP_ATTEMPTS = 2
+# The index write after an upload gets one more try (see _store_one).
+_INDEX_PUT_ATTEMPTS = 2
 # cache_put() refuses larger objects; the largest real transcript is ~0.4 MB gzipped.
 _BLOB_MAX_BYTES = 2_000_000
 # Payloads waiting to be stored, in encoded bytes. Past this, new ones are dropped.
@@ -151,8 +153,11 @@ class ResultCache:
         hit_event_default: str | None = None,
         fresh_event_default: str | None = None,
         ttl_days: int | None = None,
+        label: str | None = None,
     ) -> ResultCache:
         """Read the environment, log the mode, return. No network call. Never raises.
+
+        `label` names what the namespace holds in the mode line ("profiles").
 
         `ttl_days` sets this namespace's retention in code, so one Actor can keep
         several namespaces for different lengths of time. It is clamped to
@@ -160,6 +165,7 @@ class ResultCache:
         operator's ceiling), else to 1..365. Omitted: the env var, else 90.
         """
         cache = cls(str(namespace), schema_version, hit_event_default, fresh_event_default, ttl_days)
+        cache._label = str(label).strip() or None if label else None
         try:
             cache._configure()
         except Exception as exc:  # noqa: BLE001 - permissive by design
@@ -208,7 +214,7 @@ class ResultCache:
                 else:
                     self._serving = True
                     self._serve_started = True
-                    Actor.log.info(messages.mode_serve(self.ttl_days))
+                    Actor.log.info(messages.mode_serve(self.ttl_days, getattr(self, "_label", None)))
                     return
         Actor.log.info(messages.mode_keys())
 
@@ -403,7 +409,7 @@ class ResultCache:
                 except Exception as exc:  # noqa: BLE001 - a failed lookup is a miss
                     last_exc = exc
             if rows is None:
-                self._warn_once("lookup", messages.lookup_unavailable(str(last_exc)))
+                self._note_once("lookup", messages.lookup_unavailable(str(last_exc)))
                 return found
             for row in rows:
                 entry = _entry_from_row(row)
@@ -437,7 +443,13 @@ class ResultCache:
         try:
             return codec.decode(blob, entry.sha256)
         except codec.CodecError as exc:
-            self._warn_once("corrupt", messages.blob_rejected(str(exc)))
+            if str(exc) == "sha256 mismatch":
+                # The object was overwritten by a newer store whose index write
+                # has not landed (or failed). Never served; the caller's fresh
+                # fetch stores it again, which repairs the index.
+                self._note_once("superseded", messages.blob_superseded())
+            else:
+                self._warn_once("corrupt", messages.blob_rejected(str(exc)))
             return None
 
     async def get_blobs(self, entries: Iterable[CacheEntry | None], *,
@@ -537,21 +549,30 @@ class ResultCache:
             self._storage_failed(exc)
             return False
         self._storage_failures = 0
-        try:
-            await db.cache_put(
-                namespace=self._namespace, key_hash=key, schema_version=self._schema_version,
-                entity_id=entity_id, blob_ref=ref, sha256=sha, size_bytes=size,
-                ttl_days=self.ttl_days, actor_id=cfg.actor_id, is_paying=cfg.is_paying,
-            )
-        except Exception as exc:  # noqa: BLE001
-            self._warn_once("index_put", messages.index_write_failed(str(exc)))
+        # The object is already overwritten, so an index row left behind would
+        # describe the old bytes and fail its digest check on the next read.
+        # cache_put is an upsert, so sending it again is safe.
+        last_exc: BaseException | None = None
+        for _attempt in range(_INDEX_PUT_ATTEMPTS):
+            try:
+                await db.cache_put(
+                    namespace=self._namespace, key_hash=key, schema_version=self._schema_version,
+                    entity_id=entity_id, blob_ref=ref, sha256=sha, size_bytes=size,
+                    ttl_days=self.ttl_days, actor_id=cfg.actor_id, is_paying=cfg.is_paying,
+                )
+                last_exc = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+        if last_exc is not None:
+            self._note_once("index_put", messages.index_write_failed(str(last_exc)))
             return False
         self._stored += 1
         return True
 
     def _storage_failed(self, exc: BaseException) -> None:
         self._storage_failures += 1
-        self._warn_once("storage", messages.storage_unavailable(str(exc) or type(exc).__name__))
+        self._note_once("storage", messages.storage_unavailable(str(exc) or type(exc).__name__))
         if self._storage_failures >= _MAX_CONSECUTIVE_FAILURES:
             # Stop trying for the rest of the run: every video fetches fresh.
             self._serving = False
@@ -697,6 +718,15 @@ class ResultCache:
             return
         self._warned.add(tag)
         Actor.log.warning(line)
+
+    def _note_once(self, tag: str, line: str) -> None:
+        """A slow or unreachable cache: said once, at info level. The run's
+        results are unaffected and its user can do nothing about it, so it is
+        not a warning in their log."""
+        if tag in self._warned:
+            return
+        self._warned.add(tag)
+        Actor.log.info(line)
 
 
 def _entry_from_row(row: Any) -> CacheEntry | None:

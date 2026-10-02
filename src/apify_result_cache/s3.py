@@ -100,7 +100,7 @@ class S3Client:
         access_key: str,
         secret_key: str,
         *,
-        timeout: float = 10.0,
+        timeout: float = 5.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         parts = urlsplit(endpoint.strip().rstrip("/"))
@@ -114,7 +114,7 @@ class S3Client:
         self._access_key = access_key
         self._secret_key = secret_key
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=3.0, read=timeout, write=timeout, pool=3.0),
+            timeout=httpx.Timeout(connect=2.0, read=timeout, write=timeout, pool=2.0),
             transport=transport,
         )
 

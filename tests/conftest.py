@@ -97,6 +97,9 @@ class FakeDB:
     async def cache_put(self, **fields) -> None:
         if self.put_fail:
             raise CacheDBError("HTTP 500")
+        if getattr(self, "put_fail_times", 0) > 0:
+            self.put_fail_times -= 1
+            raise CacheDBError("ReadTimeout")
         self.put_calls.append(fields)
 
     async def aclose(self) -> None:

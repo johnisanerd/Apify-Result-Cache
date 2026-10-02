@@ -65,10 +65,19 @@ def mode_keys() -> str:
     )
 
 
-def mode_serve(ttl_days: int) -> str:
+def mode_serve(ttl_days: int, label: str | None = None) -> str:
+    """`label` names what this cache holds ("search results", "profiles"), so an
+    Actor with several caches does not print the same sentence with different
+    numbers and no way to tell them apart."""
+    days = f"{ttl_days} day" + ("" if ttl_days == 1 else "s")
+    if label:
+        return (
+            f"{_PREFIX} on for {label}. Repeat requests may be served from cache; "
+            f"new {label} are kept for {days}."
+        )
     return (
         f"{_PREFIX} mode serve. Repeat requests may be served from cache; new results "
-        f"are kept for {ttl_days} days."
+        f"are kept for {days}."
     )
 
 
@@ -106,6 +115,13 @@ def lookup_unavailable(reason: str) -> str:
 
 def blob_rejected(reason: str) -> str:
     return f"{_PREFIX} a stored result failed its integrity check ({reason}); fetching fresh instead."
+
+
+def blob_superseded() -> str:
+    """A stored result was replaced by a newer one while its index entry still
+    described the old one (an index write that failed, or two runs storing the
+    same key at once). Not corruption: the fresh fetch stores it again."""
+    return f"{_PREFIX} a stored result was being replaced; fetching fresh instead."
 
 
 def store_skipped(reason: str) -> str:
