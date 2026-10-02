@@ -7,6 +7,10 @@ Which Actors have the result cache installed, in which mode, and what each insta
 | `johnvc/YoutubeTranscripts` | `zPumutvB61fpEsglh` | `youtube-transcript` | **serve, live** on build 0.5.100 since 2026-09-30 21:32 UTC (PRs #7 and #8 merged; MCP gate run KP67mQOUwp3l75DOb PASS) | v0.2.2 | 2026-09-30 | Pilot. Hits charge `videoprocessed`; `max_age_days` input (default 90); owner and paid pool account verified (store, then serve). Go-live order and current state: the Actor's dev notes, "Result cache". |
 | `youtube-shorts-api` | `I4jjsTkELEeJKK8o3` | `youtube-shorts`, `youtube-shorts-channel` | keys (seen 2026-09-30) | v0.1.0 | 2026-09-30 | Installed from another session. On 0.1.0 it writes to the free-tier ledger's project; moving to 0.1.1 needs the two index variables. |
 
+## Migrations
+
+- 0006 (`cache_purge_entity`, service role only) applied 2026-10-02 to `apify-result-cache`; verified with a throwaway `test-purge3` namespace (only the named entity removed; anon cannot execute). Used by `scripts/purge_entity.py`.
+
 ## Project
 
 - Index: its own project, `apify-result-cache` (Pro org, us-east-1), since 0.1.1. 0.1.0
