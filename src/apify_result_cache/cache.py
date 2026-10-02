@@ -105,8 +105,10 @@ class ResultCache:
     """Created by `ResultCache.start()`. Do not instantiate directly."""
 
     def __init__(self, namespace: str, schema_version: int,
-                 hit_event_default: str | None, fresh_event_default: str | None) -> None:
+                 hit_event_default: str | None, fresh_event_default: str | None,
+                 ttl_days: int | None = None) -> None:
         self._namespace = namespace
+        self._ttl_override = ttl_days
         self._schema_version = schema_version
         self._hit_event_default = hit_event_default
         self._fresh_event_default = fresh_event_default
@@ -148,9 +150,16 @@ class ResultCache:
         *,
         hit_event_default: str | None = None,
         fresh_event_default: str | None = None,
+        ttl_days: int | None = None,
     ) -> ResultCache:
-        """Read the environment, log the mode, return. No network call. Never raises."""
-        cache = cls(str(namespace), schema_version, hit_event_default, fresh_event_default)
+        """Read the environment, log the mode, return. No network call. Never raises.
+
+        `ttl_days` sets this namespace's retention in code, so one Actor can keep
+        several namespaces for different lengths of time. It is clamped to
+        1..RESULT_CACHE_TTL_DAYS when that env var is set (the env var is the
+        operator's ceiling), else to 1..365. Omitted: the env var, else 90.
+        """
+        cache = cls(str(namespace), schema_version, hit_event_default, fresh_event_default, ttl_days)
         try:
             cache._configure()
         except Exception as exc:  # noqa: BLE001 - permissive by design
@@ -199,7 +208,7 @@ class ResultCache:
                 else:
                     self._serving = True
                     self._serve_started = True
-                    Actor.log.info(messages.mode_serve(cfg.ttl_days))
+                    Actor.log.info(messages.mode_serve(self.ttl_days))
                     return
         Actor.log.info(messages.mode_keys())
 
@@ -276,6 +285,11 @@ class ResultCache:
 
     @property
     def ttl_days(self) -> int:
+        ceiling = config.MAX_TTL_DAYS
+        if self._config is not None and self._config.ttl_from_env:
+            ceiling = self._config.ttl_days
+        if isinstance(self._ttl_override, int) and not isinstance(self._ttl_override, bool):
+            return max(config.MIN_TTL_DAYS, min(ceiling, self._ttl_override))
         return self._config.ttl_days if self._config is not None else config.DEFAULT_TTL_DAYS
 
     @property
@@ -527,7 +541,7 @@ class ResultCache:
             await db.cache_put(
                 namespace=self._namespace, key_hash=key, schema_version=self._schema_version,
                 entity_id=entity_id, blob_ref=ref, sha256=sha, size_bytes=size,
-                ttl_days=cfg.ttl_days, actor_id=cfg.actor_id, is_paying=cfg.is_paying,
+                ttl_days=self.ttl_days, actor_id=cfg.actor_id, is_paying=cfg.is_paying,
             )
         except Exception as exc:  # noqa: BLE001
             self._warn_once("index_put", messages.index_write_failed(str(exc)))

@@ -61,6 +61,7 @@ class Config:
     @property
     def storage_configured(self) -> bool:
         return bool(self.s3_endpoint and self.s3_access_key and self.s3_secret_key)
+    ttl_from_env: bool = False    # RESULT_CACHE_TTL_DAYS was set: it caps per-namespace TTLs
 
 
 @dataclass(frozen=True)
@@ -117,10 +118,12 @@ def resolve(env: Mapping[str, str], at_home: bool) -> Resolution:
         return inert(messages.reason_no_identity(), warning=True)
 
     ttl_days = DEFAULT_TTL_DAYS
+    ttl_from_env = False
     raw_ttl = (env.get("RESULT_CACHE_TTL_DAYS") or "").strip()
     if raw_ttl:
         try:
             ttl_days = max(MIN_TTL_DAYS, min(MAX_TTL_DAYS, int(raw_ttl)))
+            ttl_from_env = True
         except ValueError:
             notes.append(messages.bad_ttl(raw_ttl, DEFAULT_TTL_DAYS))
 
@@ -132,6 +135,7 @@ def resolve(env: Mapping[str, str], at_home: bool) -> Resolution:
         user_hash=user_hash(user_id),
         is_paying=env.get("APIFY_USER_IS_PAYING") == "1",
         ttl_days=ttl_days,
+        ttl_from_env=ttl_from_env,
         hit_event=_optional(env, "RESULT_CACHE_HIT_EVENT"),
         fresh_event=_optional(env, "RESULT_CACHE_FRESH_EVENT"),
         s3_endpoint=_optional(env, "RESULT_CACHE_S3_ENDPOINT"),

@@ -207,6 +207,28 @@ async def test_ttl_comes_from_the_environment(actor, db, s3, serve_env, monkeypa
     assert db.put_calls[0]["ttl_days"] == 30
 
 
+async def test_per_namespace_ttl_overrides_the_default(actor, db, s3, serve_env):
+    cache = await ResultCache.start("test-ns", 1, ttl_days=7)
+    cache.put(hexkey(1), entity_id="jane-doe", payload=PAYLOAD)
+    await settle_puts(cache)
+    assert cache.ttl_days == 7
+    assert db.put_calls[0]["ttl_days"] == 7
+
+
+async def test_env_ttl_caps_per_namespace_ttl(actor, db, s3, serve_env, monkeypatch):
+    monkeypatch.setenv("RESULT_CACHE_TTL_DAYS", "30")
+    long_lived = await ResultCache.start("test-ns", 1, ttl_days=90)
+    short_lived = await ResultCache.start("test-ns2", 1, ttl_days=3)
+    assert long_lived.ttl_days == 30
+    assert short_lived.ttl_days == 3
+
+
+async def test_per_namespace_ttl_is_clamped_and_validated(actor, db, s3, serve_env):
+    assert (await ResultCache.start("test-ns", 1, ttl_days=0)).ttl_days == 1
+    assert (await ResultCache.start("test-ns", 1, ttl_days=10_000)).ttl_days == 365
+    assert (await ResultCache.start("test-ns", 1, ttl_days=True)).ttl_days == 90  # bool is not a TTL
+
+
 # ------------------------------------------------------- promise 3: nothing here can break a run
 
 

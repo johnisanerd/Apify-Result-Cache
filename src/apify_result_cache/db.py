@@ -118,6 +118,18 @@ class CacheDB:
             },
         )
 
+    async def cache_purge_entity(self, namespaces: list[str], entity_id: str) -> list[dict[str, Any]]:
+        """Delete every live index row for one entity; returns their blob refs.
+        Service key only (migration 0006)."""
+        result = await self._rpc(
+            "cache_purge_entity", {"p_namespaces": list(namespaces), "p_entity_id": entity_id}
+        )
+        if result is None:
+            return []
+        if not isinstance(result, list):
+            raise CacheDBError("bad response")
+        return result
+
     async def cache_stats(
         self,
         date_from: str,

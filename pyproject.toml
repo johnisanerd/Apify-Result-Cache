@@ -1,6 +1,6 @@
 [project]
 name = "apify-result-cache"
-version = "0.2.2"
+version = "0.3.0"
 description = "Result cache for Apify Actors: serve a repeat request from your own store instead of re-scraping it. Phase 0 records request keys to measure the hit rate before anything is served."
 readme = "README.md"
 requires-python = ">=3.11"

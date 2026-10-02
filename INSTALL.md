@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.2.2.tar.gz" }
+apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.3.0.tar.gz" }
 ```
 
 ```bash
@@ -131,3 +131,19 @@ Console → Actor → Source → the version → Environment variables: add
 
 Add a row to [ROLLOUT.md](ROLLOUT.md), and remind the owner to prune the builds that
 predate the install.
+
+
+## Per-namespace retention (0.3.0)
+
+`ResultCache.start(namespace, schema_version, ttl_days=7)` keeps that namespace's
+results for 7 days. One Actor can run several namespaces with different
+retention. `RESULT_CACHE_TTL_DAYS`, when set, is the ceiling for every
+namespace in that build; unset, the range is 1..365. TTL is whole days; for
+anything shorter, put a time bucket in the key fields (e.g. 6-hour buckets).
+
+## Removing one entity (0.3.0, needs migration 0006)
+
+`scripts/purge_entity.py --entity <id> --namespaces a,b,c` deletes every live
+index row for that entity id in those namespaces (served nowhere from that
+moment), deletes the payload objects, and blanks the id in the request log.
+Use it for opt-out and removal requests about a person.
