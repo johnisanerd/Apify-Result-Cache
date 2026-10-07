@@ -21,6 +21,7 @@ from ._version import __version__
 from .cache import CacheEntry, ResultCache
 from .codec import CodecError
 from .db import CacheDBError
+from .google_ai_overview import ai_overview_key_fields
 from .youtube import youtube_key_fields
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     "CodecError",
     "ResultCache",
     "__version__",
+    "ai_overview_key_fields",
     "youtube_key_fields",
 ]

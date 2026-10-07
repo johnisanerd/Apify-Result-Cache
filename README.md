@@ -43,7 +43,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.3.1.tar.gz" }
+apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.4.0.tar.gz" }
 ```
 
 Then `uv lock`. The tarball form needs no `git` binary inside the Actor image.
@@ -90,6 +90,9 @@ scoped by it, so one index and one bucket serve the whole fleet. Pick the fields
 identify a request (not the whole input: output formats and metadata joins are derived
 at serve time) and pass them to `key()`. A normaliser module per source keeps Phase 0
 and Phase 1 keys identical; `youtube_key_fields` is the first one and the template.
+`ai_overview_key_fields` (namespace `google-ai-overview`, 0.4.0) normalises Google AI Overview
+requests: query whitespace collapsed and casefolded, `gl`/`hl` defaulted to `us`/`en`, blank
+location as null.
 
 ## Configuration
 
