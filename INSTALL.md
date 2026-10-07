@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.3.1.tar.gz" }
+apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.4.0.tar.gz" }
 ```
 
 ```bash

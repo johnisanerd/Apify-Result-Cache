@@ -1,0 +1,24 @@
+{
+  "namespace": "google-ai-overview",
+  "actor": "johnvc/Google-AI-Overview-API",
+  "actor_id": "XqEZodkkqvqAtiSkV",
+  "schema_version": 1,
+  "hit_event_default": "overview-retrieval",
+  "ttl_days": 7,
+  "key_fields": ["query", "gl", "hl", "location"],
+  "exclude_entity_ids": [
+    "what is the siliconimist podcast?",
+    "where is apify?",
+    "what is a heat pump",
+    "how does a heat pump work",
+    "what is retrieval augmented generation",
+    "how does vector search work",
+    "what is a transformer model",
+    "best practices for prompt engineering",
+    "electric vehicle tax credit",
+    "what is a certificate of deposit",
+    "best project management software",
+    "ai overview"
+  ],
+  "exclude_reason": "Example queries from the Actor README, input prefill, published tasks, and the owner's own test and keep-alive schedules. That traffic repeats them; the overlap is real but says nothing about customer demand, so they are excluded from every hit-rate figure. Entity ids are the normalised query text (ai_overview_key_fields)."
+}
