@@ -1,0 +1,29 @@
+{
+  "namespace": "google-maps-page",
+  "actor": "johnvc/google-maps-places-api",
+  "actor_id": "WQbrHYgrJV5fP6b09",
+  "schema_version": 1,
+  "ttl_days": 1,
+  "hit_event_default": "place",
+  "key_fields": [
+    "q",
+    "location",
+    "hl",
+    "page"
+  ],
+  "entity_id_format": "<term, first 80 chars>@<location, first 40 chars>#<page>",
+  "exclude_entity_ids": [
+    "coffee shops in Austin, TX@Austin, TX, United States#1",
+    "bookstores in Austin, TX@Austin, TX, United States#1",
+    "coffee shops in Austin, TX@#1",
+    "roofing contractors in Tampa, FL@#1",
+    "dentists in 33139@#1",
+    "med spas in Miami, FL@#1",
+    "plumbers in Denver, CO@#1",
+    "electricians in Denver, CO@#1",
+    "landscapers in Phoenix, AZ@#1",
+    "咖啡店 上海@#1",
+    "中餐馆 洛杉矶@#1"
+  ],
+  "exclude_reason": "Input prefill, README examples and the 9 published task pages (as of 2026-10-07). Free 'try it' traffic repeats them; excluded from hit-rate figures. The page viewport is stored in the payload, not the key."
+}

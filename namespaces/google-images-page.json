@@ -1,0 +1,33 @@
+{
+  "namespace": "google-images-page",
+  "actor": "johnvc/google-images-api",
+  "actor_id": "bvAQMqCbp6wE53JzK",
+  "schema_version": 1,
+  "ttl_days": 1,
+  "hit_event_default": "image_scraped",
+  "key_fields": [
+    "q",
+    "gl",
+    "hl",
+    "num",
+    "page"
+  ],
+  "entity_id_format": "<gl>:<hl>:<q, first 100 chars>#<page>",
+  "exclude_entity_ids": [
+    "us:en:golden retriever puppy#1",
+    "us:en:eiffel tower at night#1",
+    "us:en:hiking boots#1",
+    "us:en:stanley tumbler#1",
+    "us:en:mid century modern sofa#1",
+    "us:en:golden retriever#1",
+    "us:en:german shepherd#1",
+    "us:en:labrador retriever#1",
+    "us:en:mount fuji#1",
+    "us:en:coffee mug#1",
+    "us:en:yosemite national park#1",
+    "us:zh-cn:故宫 建筑#1",
+    "us:zh-cn:熊猫#1",
+    "us:zh-cn:竹林#1"
+  ],
+  "exclude_reason": "Input prefill, README examples and the 11 published task pages (as of 2026-10-07). Free 'try it' traffic repeats them; that overlap is real but worthless (Apify covers free users), so they are excluded from hit-rate figures."
+}
