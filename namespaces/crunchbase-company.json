@@ -1,0 +1,22 @@
+{
+  "namespace": "crunchbase-company",
+  "actor": "johnvc/crunchbase-company-api",
+  "actor_id": "u4XY17ykVgWgt2Wv2",
+  "schema_version": 1,
+  "hit_event_default": "company-scraped",
+  "ttl_days": 45,
+  "key_fields": ["slug"],
+  "entity_id_format": "<organization slug, lower-case>",
+  "exclude_entity_ids": [
+    "openai",
+    "anthropic",
+    "stripe",
+    "basecamp",
+    "mistral-ai",
+    "figma",
+    "canva",
+    "boldvoice",
+    "microsoft"
+  ],
+  "exclude_reason": "The input prefill (openai, also Apify's daily Store test and the owner's monthly keep-alive schedules), the README example URLs and name lookups, and the published task examples. That traffic repeats them; the overlap says nothing about customer demand, so they are excluded from every hit-rate figure. Entity ids are organization slugs (crunchbase_company_key_fields)."
+}

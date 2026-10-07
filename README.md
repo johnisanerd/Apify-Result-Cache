@@ -43,7 +43,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.4.0.tar.gz" }
+apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.5.0.tar.gz" }
 ```
 
 Then `uv lock`. The tarball form needs no `git` binary inside the Actor image.
@@ -93,6 +93,9 @@ and Phase 1 keys identical; `youtube_key_fields` is the first one and the templa
 `ai_overview_key_fields` (namespace `google-ai-overview`, 0.4.0) normalises Google AI Overview
 requests: query whitespace collapsed and casefolded, `gl`/`hl` defaulted to `us`/`en`, blank
 location as null.
+`crunchbase_company_key_fields` and `crunchbase_lookup_key_fields` (namespaces `crunchbase-company`
+and `crunchbase-lookup`, 0.5.0) normalise Crunchbase requests: an organization URL or bare slug
+collapses to the lower-case slug; a name or domain lookup term is whitespace-collapsed and casefolded.
 
 ## Configuration
 

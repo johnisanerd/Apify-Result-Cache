@@ -1,0 +1,17 @@
+{
+  "namespace": "crunchbase-lookup",
+  "actor": "johnvc/crunchbase-company-api",
+  "actor_id": "u4XY17ykVgWgt2Wv2",
+  "schema_version": 1,
+  "ttl_days": 90,
+  "key_fields": ["term"],
+  "entity_id_format": "<organization slug the term resolved to, lower-case>",
+  "exclude_entity_ids": [
+    "openai",
+    "anthropic",
+    "stripe",
+    "basecamp",
+    "microsoft"
+  ],
+  "exclude_reason": "Resolutions of the README example name lookups (OpenAI, Basecamp, stripe.com, Microsoft, Anthropic) and the owner's own test runs. Payload is {slug, name, website}; the company page itself is cached in crunchbase-company. Entity ids are the resolved organization slugs."
+}
