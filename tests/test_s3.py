@@ -3,6 +3,7 @@ request and error behaviour pinned with a mock transport."""
 
 from __future__ import annotations
 
+import base64
 import hashlib
 
 import httpx
