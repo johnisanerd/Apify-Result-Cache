@@ -11,9 +11,11 @@ Supabase Storage S3 endpoint today, a self-hosted server later (Phase 2).
 
 from __future__ import annotations
 
+import base64
 import datetime
 import hashlib
 import hmac
+import re
 from typing import Mapping
 from urllib.parse import quote, urlsplit
 
@@ -89,6 +91,16 @@ def sign_request(
     }
 
 
+def _xml_escape(text: str) -> str:
+    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace('"', "&quot;").replace("'", "&apos;"))
+
+
+def _xml_unescape(text: str) -> str:
+    return (text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"')
+                .replace("&apos;", "'").replace("&amp;", "&"))
+
+
 class S3Client:
     """PUT, GET and DELETE of single objects in one bucket. Never retries, never logs."""
 
@@ -128,19 +140,23 @@ class S3Client:
         body: bytes = b"",
         payload_sha256: str = EMPTY_SHA256,
         headers: Mapping[str, str] | None = None,
+        query: Mapping[str, str] | None = None,
     ) -> httpx.Response:
-        path = self._path(key)
+        # An empty key addresses the bucket itself (bucket-level operations).
+        path = self._path(key) if key else uri_encode_path(f"{self._prefix}/{self._bucket}")
         amz_date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         send_headers = dict(headers or {})
         send_headers.update(sign_request(
             method=method, host=self._host, path=path, payload_sha256=payload_sha256,
             access_key=self._access_key, secret_key=self._secret_key, region=self._region,
-            amz_date=amz_date, headers=headers,
+            amz_date=amz_date, headers=headers, query=query,
         ))
+        url = f"{self._scheme}://{self._host}{path}"
+        if query:
+            url += "?" + "&".join(f"{k}={v}" if v != "" else k for k, v in sorted(query.items()))
         try:
             return await self._client.request(
-                method, f"{self._scheme}://{self._host}{path}",
-                content=body or None, headers=send_headers,
+                method, url, content=body or None, headers=send_headers,
             )
         except Exception as exc:  # noqa: BLE001 - type name only; the message can carry the host
             raise S3Error(type(exc).__name__) from None
@@ -167,6 +183,39 @@ class S3Client:
         response = await self._send("DELETE", key)
         if response.status_code not in (200, 204, 404):
             raise S3Error(f"HTTP {response.status_code}")
+
+    async def delete_objects(self, keys: list[str]) -> list[str]:
+        """DeleteObjects (POST /bucket?delete) for up to 1000 keys in one request.
+
+        Returns the keys the service reported as failed (quiet mode: the
+        response lists errors only). A key that is already gone counts as
+        deleted. Raises S3Error on a transport error or a non-200 answer, so
+        the caller can back off (429) or fall back to single deletes.
+        """
+        if not keys:
+            return []
+        if len(keys) > 1000:
+            raise ValueError("at most 1000 keys per DeleteObjects request")
+        body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Delete xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Quiet>true</Quiet>'
+            + "".join(f"<Object><Key>{_xml_escape(k)}</Key></Object>" for k in keys)
+            + "</Delete>"
+        ).encode("utf-8")
+        headers = {
+            "content-type": "application/xml",
+            "content-md5": base64.b64encode(hashlib.md5(body).digest()).decode("ascii"),
+        }
+        response = await self._send("POST", "", body, hashlib.sha256(body).hexdigest(), headers,
+                                    query={"delete": ""})
+        if response.status_code != 200:
+            raise S3Error(f"HTTP {response.status_code}")
+        failed: list[str] = []
+        for block in re.findall(r"<Error>(.*?)</Error>", response.text, flags=re.S):
+            m = re.search(r"<Key>(.*?)</Key>", block, flags=re.S)
+            if m:
+                failed.append(_xml_unescape(m.group(1)))
+        return failed
 
     async def aclose(self) -> None:
         try:

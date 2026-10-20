@@ -130,3 +130,50 @@ async def test_delete_accepts_gone(status):
 def test_bad_endpoint_is_rejected():
     with pytest.raises(ValueError):
         S3Client("ref.storage.supabase.co", "us-east-1", "b", AK, SK)
+
+
+async def test_delete_objects_posts_a_signed_quiet_batch_and_reports_failures():
+    seen = {}
+
+    def handler(request: httpx.Request):
+        seen["request"] = request
+        return httpx.Response(200, text=(
+            '<?xml version="1.0" encoding="UTF-8"?><DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+            "<Error><Key>ns/cd/gone-wrong.json.gz</Key><Code>InternalError</Code><Message>x</Message></Error>"
+            "</DeleteResult>"))
+
+    c = client(handler)
+    failed = await c.delete_objects(["ns/ab/k.json.gz", "ns/cd/gone-wrong.json.gz"])
+    await c.aclose()
+
+    req = seen["request"]
+    assert req.method == "POST"
+    assert str(req.url) == ENDPOINT + "/result-cache?delete"
+    assert b"<Quiet>true</Quiet>" in req.content
+    assert b"<Key>ns/ab/k.json.gz</Key>" in req.content and b"<Key>ns/cd/gone-wrong.json.gz</Key>" in req.content
+    assert req.headers["content-type"] == "application/xml"
+    assert req.headers["content-md5"] == base64.b64encode(hashlib.md5(req.content).digest()).decode()
+    assert req.headers["x-amz-content-sha256"] == hashlib.sha256(req.content).hexdigest()
+    expected = sign_request(
+        method="POST", host="ref.storage.supabase.co", path="/storage/v1/s3/result-cache",
+        headers={"content-type": "application/xml", "content-md5": req.headers["content-md5"]},
+        payload_sha256=req.headers["x-amz-content-sha256"], query={"delete": ""},
+        access_key=AK, secret_key=SK, region="us-east-1", amz_date=req.headers["x-amz-date"],
+    )
+    assert req.headers["authorization"] == expected["authorization"]
+    assert failed == ["ns/cd/gone-wrong.json.gz"]
+
+
+@pytest.mark.parametrize("status", [429, 500])
+async def test_delete_objects_raises_on_refusal(status):
+    c = client(lambda request: httpx.Response(status))
+    with pytest.raises(S3Error) as exc:
+        await c.delete_objects(["ns/ab/k.json.gz"])
+    assert str(exc.value) == f"HTTP {status}"
+    await c.aclose()
+
+
+async def test_delete_objects_with_no_keys_sends_nothing():
+    c = client(lambda request: (_ for _ in ()).throw(AssertionError("must not send")))
+    assert await c.delete_objects([]) == []
+    await c.aclose()

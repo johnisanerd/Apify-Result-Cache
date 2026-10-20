@@ -53,6 +53,54 @@ def storage_client(index_url: str) -> S3Client | None:
                     os.getenv("RESULT_CACHE_S3_BUCKET", "result-cache"), access, secret)
 
 
+async def _retry_db(coro_factory, what: str, tries: int = 3):
+    """One index call, retried on transport errors (ConnectError, ReadTimeout)."""
+    last = None
+    for attempt in range(tries):
+        try:
+            return await coro_factory()
+        except CacheDBError as exc:
+            last = exc
+            if attempt + 1 < tries:
+                await asyncio.sleep(2 * (attempt + 1))
+    raise CacheDBError(f"{what}: {last}")
+
+
+async def _delete_batch(s3: S3Client, refs: list[str]) -> tuple[list[str], int]:
+    """Delete `refs`; return (deleted refs, failures). DeleteObjects first, with
+    backoff on 429 and 5xx; single paced deletes if the batch call is refused."""
+    delay = 2.0
+    for _attempt in range(6):
+        try:
+            failed = set(await s3.delete_objects(refs))
+            return [r for r in refs if r not in failed], len(failed)
+        except S3Error as exc:
+            text = str(exc)
+            if text in ("HTTP 429", "HTTP 503", "HTTP 502", "HTTP 500") or not text.startswith("HTTP"):
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 60.0)
+                continue
+            break   # the batch call is refused outright (e.g. 400/501): fall back
+    deleted: list[str] = []
+    failures = 0
+    for ref in refs:
+        for backoff in (0.0, 2.0, 4.0, 8.0, 16.0):
+            try:
+                if backoff:
+                    await asyncio.sleep(backoff)
+                await s3.delete_object(ref)
+                deleted.append(ref)
+                break
+            except S3Error as exc:
+                if str(exc) != "HTTP 429" and backoff:
+                    failures += 1
+                    break
+        else:
+            failures += 1
+        await asyncio.sleep(0.05)   # ~20 deletes/s on the fallback path
+    return deleted, failures
+
+
 async def expire_payloads(db: CacheDB, args) -> None:
     s3 = storage_client(args.url)
     if s3 is None:
@@ -61,7 +109,7 @@ async def expire_payloads(db: CacheDB, args) -> None:
     deleted_objects = deleted_rows = failures = 0
     try:
         for batch in range(args.max_batches):
-            rows = await db.cache_expired(1000)
+            rows = await _retry_db(lambda: db.cache_expired(1000), "cache_expired")
             if not rows:
                 if batch == 0:
                     print("Payload expiry: nothing has expired yet; no objects or index rows to delete.\n")
@@ -69,20 +117,21 @@ async def expire_payloads(db: CacheDB, args) -> None:
             if args.dry_run:
                 print(f"Payload expiry: {len(rows)}+ expired result(s) would be deleted (dry run).")
                 break
+            by_ref = {row["blob_ref"]: row for row in rows}
+            done, failed_now = await _delete_batch(s3, list(by_ref))
+            failures += failed_now
+            deleted_objects += len(done)
             by_namespace: dict[str, list[str]] = {}
-            for row in rows:
-                try:
-                    await s3.delete_object(row["blob_ref"])
-                    deleted_objects += 1
-                    by_namespace.setdefault(row["namespace"], []).append(row["key_hash"])
-                except S3Error as exc:
-                    failures += 1
-                    if failures <= 3:
-                        print(f"  object delete failed: {exc}", file=sys.stderr)
+            for ref in done:
+                row = by_ref[ref]
+                by_namespace.setdefault(row["namespace"], []).append(row["key_hash"])
             for namespace, keys in by_namespace.items():
-                deleted_rows += await db.cache_delete_index(namespace, keys)
-            if failures and not deleted_objects:
-                break
+                deleted_rows += await _retry_db(lambda ns=namespace, ks=keys: db.cache_delete_index(ns, ks),
+                                                "cache_delete_index")
+            if (batch + 1) % 10 == 0:
+                print(f"  ... {deleted_objects:,} objects and {deleted_rows:,} index rows so far", flush=True)
+            if not done:
+                break   # nothing is getting through; stop rather than spin
             if len(rows) < 1000:
                 break
     finally:
