@@ -19,7 +19,7 @@ MODES = ("off", "keys", "serve")
 # caching negative results can be measured. The index accepts it from
 # migration 0005 on; an older index rejects the whole batch, so Actors only
 # log it once that migration is in.
-OUTCOMES = frozenset({"logged", "hit", "miss", "bypass", "expired", "error", "failed"})
+OUTCOMES = frozenset({"logged", "hit", "hit_negative", "miss", "bypass", "expired", "error", "failed"})
 
 DEFAULT_TTL_DAYS = 90
 DEFAULT_S3_REGION = "us-east-1"

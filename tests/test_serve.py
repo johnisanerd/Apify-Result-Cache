@@ -547,3 +547,32 @@ async def test_the_mode_line_names_what_is_cached(actor, db, s3, serve_env):
 
     assert any("on for search results" in i and "kept for 1 day." in i for i in actor.log.infos)
     assert any("on for profiles" in i and "kept for 7 days." in i for i in actor.log.infos)
+
+
+async def test_put_entry_ttl_is_passed_to_the_index(actor, db, s3, serve_env):
+    cache = await start()
+    cache.put(hexkey(1), entity_id="a", payload=PAYLOAD, ttl_days=14)
+    cache.put(hexkey(2), entity_id="b", payload=PAYLOAD)
+    cache.put(hexkey(3), entity_id="c", payload=PAYLOAD, ttl_days=10_000)
+    cache.put(hexkey(4), entity_id="d", payload=PAYLOAD, ttl_days=0)
+    await cache.close()
+
+    ttls = {call["key_hash"]: call["ttl_days"] for call in db.put_calls}
+    assert ttls[hexkey(1)] == 14
+    assert ttls[hexkey(2)] == cache.ttl_days          # default: the namespace retention
+    assert ttls[hexkey(3)] == cache.ttl_days          # never longer than the namespace
+    assert ttls[hexkey(4)] == cache.ttl_days          # not a positive integer: default
+    assert sum("ttl_days" in w for w in actor.log.warnings) == 1
+
+
+async def test_hit_negative_is_served_and_counted(actor, db, s3, serve_env):
+    cache = await start()
+    cache.log(hexkey(1), "a", "hit_negative")
+    cache.log(hexkey(2), "b", "hit")
+    cache.log(hexkey(3), "c", "miss")
+    await cache.close()
+
+    [line] = [m for m in actor.log.infos if "from cache and stored" in m]
+    assert "served 2 of 3 request(s) from cache" in line
+    assert not [w for w in actor.log.warnings if "outcome" in w.lower()]
+    assert cache.stats["outcomes"]["hit_negative"] == 1

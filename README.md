@@ -43,7 +43,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.5.0.tar.gz" }
+apify-result-cache = { url = "https://github.com/johnisanerd/Apify-Result-Cache/archive/refs/tags/v0.5.1.tar.gz" }
 ```
 
 Then `uv lock`. The tarball form needs no `git` binary inside the Actor image.
@@ -139,7 +139,7 @@ the run continues with its normal output:
 
 | Data | Limit | Enforced by |
 | --- | --- | --- |
-| Stored results | `RESULT_CACHE_TTL_DAYS` (default 90, max 365), and per request the Actor's max-age input | `cache_put` / `cache_lookup`; physical deletion by `scripts/cache_gc.py` |
+| Stored results | `RESULT_CACHE_TTL_DAYS` (default 90, max 365), per namespace `ResultCache.start(ttl_days=)`, and per entry `put(ttl_days=)` (never longer than the namespace); per request the Actor's max-age input | `cache_put` / `cache_lookup`; physical deletion by `scripts/cache_gc.py` |
 | Request log | 180 days | `scripts/cache_gc.py` |
 
 ## Operator scripts

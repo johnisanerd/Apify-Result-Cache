@@ -134,7 +134,7 @@ class ResultCache:
         self._serving = False
         self._serve_started = False
         self._storage_failures = 0
-        self._put_queue: deque[tuple[str, str | None, bytes, str, int]] = deque()
+        self._put_queue: deque[tuple[str, str | None, bytes, str, int, int | None]] = deque()
         self._put_bytes = 0
         self._put_task: asyncio.Task[None] | None = None
         self._put_seen: set[str] = set()      # keys queued or stored this run
@@ -475,13 +475,20 @@ class ResultCache:
                 found[item[0]] = item[1]
         return found
 
-    def put(self, key: str, *, entity_id: str | None, payload: Mapping[str, Any]) -> None:
+    def put(self, key: str, *, entity_id: str | None, payload: Mapping[str, Any],
+            ttl_days: int | None = None) -> None:
         """Store a fresh payload under `key`. Synchronous and fire-and-forget; never raises.
 
         The payload is encoded now (so later changes to the caller's dicts
         cannot leak in) and uploaded in the background. A key already queued
         or stored this run is skipped: the same request twice in one run (a
         duplicate URL) uploads once.
+
+        `ttl_days` keeps this one entry for a shorter time than the namespace
+        (a "no captions" verdict next to 90-day transcripts). It is clamped to
+        1..`self.ttl_days`: an entry can never outlive its namespace, and a
+        value that is not a positive integer falls back to the namespace TTL
+        with one warning.
         """
         if not self.serving:
             return
@@ -506,10 +513,23 @@ class ResultCache:
             self._warn_once("put_queue", messages.store_skipped("store queue full"))
             return
         self._put_queue.append((key, None if entity_id is None else str(entity_id)[:_ENTITY_ID_MAX],
-                                blob, sha, size))
+                                blob, sha, size, self._entry_ttl(ttl_days)))
         self._put_bytes += size
         self._put_seen.add(key)
         self._schedule_puts()
+
+    def _entry_ttl(self, ttl_days: int | None) -> int | None:
+        """Per-entry retention in days, or None for the namespace default."""
+        if ttl_days is None:
+            return None
+        try:
+            days = int(ttl_days)
+        except (TypeError, ValueError):
+            days = 0
+        if days < 1:
+            self._warn_once("entry_ttl", messages.entry_ttl_ignored(ttl_days))
+            return None
+        return min(days, self.ttl_days)
 
     def _schedule_puts(self) -> None:
         if self._put_task is not None and not self._put_task.done():
@@ -537,8 +557,8 @@ class ResultCache:
                 if not stored:
                     self._put_dropped += 1
 
-    async def _store_one(self, item: tuple[str, str | None, bytes, str, int]) -> bool:
-        key, entity_id, blob, sha, size = item
+    async def _store_one(self, item: tuple[str, str | None, bytes, str, int, int | None]) -> bool:
+        key, entity_id, blob, sha, size, entry_ttl = item
         s3, db, cfg = self._s3, self._db, self._config
         if s3 is None or db is None or cfg is None:
             return False
@@ -558,7 +578,7 @@ class ResultCache:
                 await db.cache_put(
                     namespace=self._namespace, key_hash=key, schema_version=self._schema_version,
                     entity_id=entity_id, blob_ref=ref, sha256=sha, size_bytes=size,
-                    ttl_days=self.ttl_days, actor_id=cfg.actor_id, is_paying=cfg.is_paying,
+                    ttl_days=entry_ttl or self.ttl_days, actor_id=cfg.actor_id, is_paying=cfg.is_paying,
                 )
                 last_exc = None
                 break
@@ -703,9 +723,9 @@ class ResultCache:
         if self._mode == "inert" or not (self._recorded or self._stored):
             return
         if self._serve_started:
-            requests = sum(self._outcomes[o] for o in ("hit", "miss", "bypass", "error", "failed"))
+            requests = sum(self._outcomes[o] for o in ("hit", "hit_negative", "miss", "bypass", "error", "failed"))
             Actor.log.info(messages.serve_summary(
-                self._outcomes["hit"], requests, self._stored,
+                self._outcomes["hit"] + self._outcomes["hit_negative"], requests, self._stored,
                 self._recorded, self._flushed, self._dropped,
             ))
         else:

@@ -13,6 +13,13 @@ Which Actors have the result cache installed, in which mode, and what each insta
 
 ## Migrations
 
+- 0007 (`cache_log` accepts `hit_negative`; `cache_quota` rewritten on index counts and 2% page samples) applied
+  2026-10-20 to `apify-result-cache`. Why: at 1.9M log rows and 1.55M index rows the 0003 `cache_quota` hit the API's
+  8 s statement timeout, and `cache_gc.py` gates its real run on that call, so GC had been inert since about 10-07
+  while 135k expired entries (1-7 day namespaces) sat in the index and bucket. Library **v0.5.1**: `put(ttl_days=)`
+  per entry (clamped to the namespace TTL; YouTube stores "no captions" verdicts for 14 days instead of 90) and the
+  `hit_negative` outcome, so served verdicts stop counting as transcript hits in the weekly read. The GC scheduled
+  task runs daily from 2026-10-21 (was monthly).
 - 0006 (`cache_purge_entity`, service role only) applied 2026-10-02 to `apify-result-cache`; verified with a throwaway `test-purge3` namespace (only the named entity removed; anon cannot execute). Used by `scripts/purge_entity.py`.
 
 ## Project

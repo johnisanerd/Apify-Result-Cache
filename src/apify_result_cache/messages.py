@@ -165,6 +165,10 @@ def close_summary(recorded: int, flushed: int, dropped: int) -> str:
     return line
 
 
+def entry_ttl_ignored(value: object) -> str:
+    return f"{_PREFIX} ignored a per-entry ttl_days of {value!r}; the namespace retention applies."
+
+
 def serve_summary(served: int, requests: int, stored: int, recorded: int, flushed: int, dropped: int) -> str:
     line = (
         f"{_PREFIX} served {served} of {requests} request(s) from cache and stored "
