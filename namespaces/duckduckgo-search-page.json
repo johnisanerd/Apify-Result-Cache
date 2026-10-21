@@ -10,8 +10,7 @@
     "kl",
     "safe",
     "df",
-    "start",
-    "m"
+    "start"
   ],
   "entity_id_format": "<query, first 80 chars>@<kl>#<page>",
   "exclude_entity_ids": [
