@@ -1,0 +1,23 @@
+{
+  "namespace": "duckduckgo-search-page",
+  "actor": "johnvc/DuckDuckGo-Scraper-for-serp-rankings",
+  "actor_id": "drYfVwbtEdPqbFkiC",
+  "schema_version": 1,
+  "ttl_days": 7,
+  "hit_event_default": "page_processed",
+  "key_fields": [
+    "q",
+    "kl",
+    "safe",
+    "df",
+    "start",
+    "m"
+  ],
+  "entity_id_format": "<query, first 80 chars>@<kl>#<page>",
+  "exclude_entity_ids": [
+    "The Siliconimist Podcast@us-en#1",
+    "python tutorial@us-en#1",
+    "machine learning@uk-en#1"
+  ],
+  "exclude_reason": "Input prefill and README examples (as of 2026-10-21). Free 'try it' traffic repeats them; excluded from hit-rate figures."
+}
