@@ -19,7 +19,10 @@ Which Actors have the result cache installed, in which mode, and what each insta
   while 135k expired entries (1-7 day namespaces) sat in the index and bucket. Library **v0.5.1**: `put(ttl_days=)`
   per entry (clamped to the namespace TTL; YouTube stores "no captions" verdicts for 14 days instead of 90) and the
   `hit_negative` outcome, so served verdicts stop counting as transcript hits in the weekly read. The GC scheduled
-  task runs daily from 2026-10-21 (was monthly). **v0.5.2/0.5.3** (0.5.3 only fixes a test import): the first real GC run (2026-10-20) hit Storage's rate limit
+  task runs daily from 2026-10-21 (was monthly). First batched pass 2026-10-20: 59,962 objects and 59,920 index rows
+  in one run; ~359k expired entries were waiting, so the daily runs catch up over a few days. TTL decisions (John,
+  2026-10-20): `google-images-page` 1 -> 7 days with no customer override (the `maxAgeDays` input is deprecated and
+  ignored); `li-serp` 1 -> 7 days (LinkedIn library v0.4.3); YouTube verdicts 90 -> 14 days. **v0.5.2/0.5.3** (0.5.3 only fixes a test import): the first real GC run (2026-10-20) hit Storage's rate limit
   at once with one DELETE per object and then lost its index connection; `S3Client.delete_objects` (DeleteObjects,
   1,000 keys per request) with backoff, a paced single-delete fallback, and retried index calls in `cache_gc.py`.
 - 0006 (`cache_purge_entity`, service role only) applied 2026-10-02 to `apify-result-cache`; verified with a throwaway `test-purge3` namespace (only the named entity removed; anon cannot execute). Used by `scripts/purge_entity.py`.
