@@ -3,7 +3,7 @@
   "actor": "johnvc/google-images-api",
   "actor_id": "bvAQMqCbp6wE53JzK",
   "schema_version": 1,
-  "ttl_days": 7,
+  "ttl_days": 30,
   "hit_event_default": "image_scraped",
   "key_fields": [
     "q",
