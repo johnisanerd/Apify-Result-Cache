@@ -1,0 +1,26 @@
+{
+  "namespace": "yelp-place-profile",
+  "actor": "johnvc/Yelp-Place-API",
+  "actor_id": "vOPAbDdSkn2ggeWU5",
+  "schema_version": 1,
+  "ttl_days": 7,
+  "hit_event_default": "place_processed",
+  "key_fields": [
+    "host",
+    "place",
+    "full_menu",
+    "menu_name",
+    "business_alert"
+  ],
+  "entity_id_format": "<encoded id or alias>|<host>[#menu]",
+  "notes": "One entry = one parsed business profile (or its full menu when full_menu is set). A fresh fetch is also stored under the business's other identifier (alias <-> encoded id), same flags. Never stored: error rows, and full_menu results whose menu page failed transiently.",
+  "exclude_entity_ids": [
+    "maman-new-york-22|www.yelp.com",
+    "maman-new-york-22|www.yelp.com#menu",
+    "DE0ROwygh-86i4s-WLp8wQ|www.yelp.com",
+    "DE0ROwygh-86i4s-WLp8wQ|www.yelp.com#menu",
+    "gramercy-tavern-new-york|www.yelp.com",
+    "zuni-cafe-san-francisco|www.yelp.com"
+  ],
+  "exclude_reason": "Input prefill, README examples and the beta test sheet (as of 2026-10-29). Free 'try it' traffic repeats them; excluded from hit-rate figures."
+}
