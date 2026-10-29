@@ -1,0 +1,34 @@
+{
+  "namespace": "local-services-page",
+  "actor": "johnvc/google-local-services-api",
+  "actor_id": "S4vytlD3hbgocTHi6",
+  "schema_version": 1,
+  "ttl_days": 1,
+  "hit_event_default": "business_returned",
+  "key_fields": [
+    "q",
+    "data_cid",
+    "hl",
+    "job_type"
+  ],
+  "entity_id_format": "<q>@<data_cid>[/<job_type>]",
+  "exclude_entity_ids": [
+    "plumber@6745062158417646970",
+    "electrician@6745062158417646970",
+    "mover@6745062158417646970",
+    "electrician@13397254124329199503",
+    "junk_removal@13397254124329199503",
+    "roofer@13397254124329199503",
+    "general_contractor@14559296326948160827",
+    "pest_control@14559296326948160827",
+    "hvac@10117837906724395948",
+    "landscaper@10117837906724395948",
+    "solar_energy_contractor@10117837906724395948",
+    "locksmith@12673312613543755776",
+    "painter@1265217891990124246",
+    "personal_injury_lawyer@16298491244936825076",
+    "real_estate_agent@18417174297042571109",
+    "tree_service@7421613531965645579"
+  ],
+  "exclude_reason": "Input prefill, README examples and task inputs (as of 2026-10-29). Free 'try it' traffic repeats them; excluded from hit-rate figures."
+}

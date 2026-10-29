@@ -1,0 +1,24 @@
+{
+  "namespace": "local-services-location",
+  "actor": "johnvc/google-local-services-api",
+  "actor_id": "S4vytlD3hbgocTHi6",
+  "schema_version": 1,
+  "ttl_days": 1,
+  "hit_event_default": "location_resolved",
+  "key_fields": [
+    "q"
+  ],
+  "entity_id_format": "<location, lowercased, whitespace collapsed>",
+  "exclude_entity_ids": [
+    "austin, tx",
+    "dallas, tx",
+    "houston, tx",
+    "phoenix, az",
+    "chicago, il",
+    "denver, co",
+    "los angeles, ca",
+    "miami, fl",
+    "atlanta, ga"
+  ],
+  "exclude_reason": "Input prefill, README examples and task inputs (as of 2026-10-29). Free 'try it' traffic repeats them; excluded from hit-rate figures."
+}

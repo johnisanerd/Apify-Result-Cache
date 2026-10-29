@@ -1,0 +1,22 @@
+{
+  "namespace": "app-store-reviews",
+  "actor": "johnvc/apple-app-store-reviews-api",
+  "actor_id": "k3dKElhh0XK52g619",
+  "schema_version": 1,
+  "ttl_days": 1,
+  "hit_event_default": "review",
+  "key_fields": [
+    "product_id",
+    "country",
+    "sort",
+    "start_page"
+  ],
+  "entity_id_format": "<product_id>@<country>/<sort>#<start_page>",
+  "exclude_entity_ids": [
+    "534220544@us/mostrecent#1",
+    "534220544@us/mosthelpful#1",
+    "534220544@us/mostcritical#1",
+    "497799835@us/mostrecent#1"
+  ],
+  "exclude_reason": "Input prefill, README examples and task inputs (as of 2026-10-29). Free 'try it' traffic repeats them; excluded from hit-rate figures."
+}

@@ -1,0 +1,18 @@
+{
+  "namespace": "maps-contributor-reviews-page",
+  "actor": "johnvc/google-maps-contributor-reviews-api",
+  "actor_id": "ZtBuxIbU7gPdQozq3",
+  "schema_version": 1,
+  "ttl_days": 3,
+  "hit_event_default": "review_scraped",
+  "key_fields": [
+    "contributor_id",
+    "hl",
+    "limit"
+  ],
+  "entity_id_format": "<Google Maps contributor ID>",
+  "exclude_entity_ids": [
+    "107022004965696773221"
+  ],
+  "exclude_reason": "Input prefill, README examples and every task input (as of 2026-10-29). Free 'try it' traffic repeats them; excluded from hit-rate figures."
+}

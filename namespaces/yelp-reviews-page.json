@@ -1,0 +1,22 @@
+{
+  "namespace": "yelp-reviews-page",
+  "actor": "johnvc/Yelp-Reviews-API",
+  "actor_id": "iTiaAgy1XorGxqnqD",
+  "schema_version": 1,
+  "ttl_days": 1,
+  "hit_event_default": "page_processed",
+  "key_fields": [
+    "place_id",
+    "yelp_domain",
+    "sortby",
+    "rating",
+    "hl",
+    "start"
+  ],
+  "entity_id_format": "<encoded place id>#<page>",
+  "exclude_entity_ids": [
+    "ED7A7vDdg8yLNKJTSVHHmg#1",
+    "ED7A7vDdg8yLNKJTSVHHmg#2"
+  ],
+  "exclude_reason": "Input prefill, README and task inputs (as of 2026-10-29). Free 'try it' traffic repeats them; excluded from hit-rate figures. Not yet listed: the encoded IDs of maman-new-york-22, the-cosmopolitan-las-vegas-2, juniors-restaurant-new-york-9 (README/task aliases); add them after the first runs."
+}
