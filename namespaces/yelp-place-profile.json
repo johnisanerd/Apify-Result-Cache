@@ -20,7 +20,11 @@
     "DE0ROwygh-86i4s-WLp8wQ|www.yelp.com",
     "DE0ROwygh-86i4s-WLp8wQ|www.yelp.com#menu",
     "gramercy-tavern-new-york|www.yelp.com",
-    "zuni-cafe-san-francisco|www.yelp.com"
+    "zuni-cafe-san-francisco|www.yelp.com",
+    "katzs-delicatessen-new-york|www.yelp.com",
+    "katzs-delicatessen-new-york|www.yelp.com#menu",
+    "V7lXZKBDzScDeGB8JmnzSA|www.yelp.com",
+    "V7lXZKBDzScDeGB8JmnzSA|www.yelp.com#menu"
   ],
-  "exclude_reason": "Input prefill, README examples and the beta test sheet (as of 2026-10-29). Free 'try it' traffic repeats them; excluded from hit-rate figures."
+  "exclude_reason": "Input prefill, README examples, task sheets and the beta test sheet (as of 2026-10-30; prefill moved from maman-new-york-22 to katzs-delicatessen-new-york). Free 'try it' traffic repeats them; excluded from hit-rate figures."
 }
