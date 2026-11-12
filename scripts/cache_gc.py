@@ -181,7 +181,7 @@ async def main() -> int:
         await expire_payloads(db, args)
 
         lines, code = quota_report(await db.cache_quota(), args.plan)
-        print(f"Quota watch ({args.plan} plan, spend cap on; WARN 80%, ERROR 95%)")
+        print(f"Quota watch ({args.plan} plan, spend cap off; WARN 80%, ERROR 95%)")
         print("\n".join(lines))
         return code
     except CacheDBError as exc:

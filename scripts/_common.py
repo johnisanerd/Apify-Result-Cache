@@ -12,8 +12,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 GB = 1024 ** 3
 
-# Pro plan included quotas (2026-09-30). The spend cap stays ON, so these are
-# ceilings, not billing thresholds: past one, the project is restricted.
+# Pro plan included quotas (2026-09-30). The org's spend cap is OFF (confirmed
+# 2026-11-12), so these are billing thresholds, not ceilings: past one, usage is
+# billed and the database disk auto-expands at 90% full (8 -> 12 GB).
 PRO_QUOTAS = {
     "db_bytes": 8 * GB,
     "live_blob_bytes": 100 * GB,

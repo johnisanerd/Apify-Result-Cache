@@ -40,7 +40,8 @@ Which Actors have the result cache installed, in which mode, and what each insta
 - Index: its own project, `apify-result-cache` (Pro org, us-east-1), since 0.1.1. 0.1.0
   wrote to the free-tier ledger's project, whose copy of the tables stays until every
   install is on 0.1.1.
-- Plan: Pro with the spend cap **on**. Quota watch: `scripts/cache_stats.py --quota`, weekly (needs
+- Plan: Pro with the spend cap **off** (confirmed on the dashboard 2026-11-12; the notes said "on" until
+  then). Past a quota, usage is billed and the database disk auto-expands at 90% (8 to 12 GB). Quota watch: `scripts/cache_stats.py --quota`, weekly (needs
   `RESULT_CACHE_SERVICE_KEY` in the local `.env`).
 - Measured 2026-09-30: `cache_lookup` 50-180 ms (1 or 100 keys). YoutubeTranscripts, 25 videos on the side
   version: platform cost $0.00112 per fresh video vs $0.000026 per cached video (~43x; the difference is

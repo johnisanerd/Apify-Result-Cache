@@ -152,11 +152,12 @@ async def run_fragmentation(db: CacheDB, args) -> int:
 
 async def run_quota(db: CacheDB, plan: str) -> int:
     lines, code = quota_report(await db.cache_quota(), plan)
-    print(f"Result cache quota watch ({plan} plan, spend cap on; WARN 80%, ERROR 95%)")
+    print(f"Result cache quota watch ({plan} plan, spend cap off; WARN 80%, ERROR 95%)")
     print("\n".join(lines))
     if code:
-        print("\nOptions: lower RESULT_CACHE_TTL_DAYS (rebuild), run cache_gc.py, "
-              "or raise the plan / turn the spend cap off (John's call).")
+        print("\nPast a quota, usage is billed (the database disk auto-expands at 90%). "
+              "Options: lower RESULT_CACHE_TTL_DAYS (rebuild), run cache_gc.py, "
+              "or accept the overage / raise the plan (John's call).")
     return code
 
 
