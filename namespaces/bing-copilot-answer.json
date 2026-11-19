@@ -1,0 +1,18 @@
+{
+  "namespace": "bing-copilot-answer",
+  "actor": "johnvc/bing-copilot-api",
+  "actor_id": "dNfYhaMvn8GJgQ7gG",
+  "schema_version": 1,
+  "hit_event_default": "copilot_queried",
+  "ttl_days": 7,
+  "key_fields": ["query", "country"],
+  "exclude_entity_ids": [
+    "best crm for startups",
+    "best help desk software",
+    "top project management tools",
+    "best project management software",
+    "what is answer engine optimization",
+    "top crm software 2026"
+  ],
+  "exclude_reason": "Example queries from the Actor README, input prefill, published tasks, local tests and the owner's MCP and keep-alive runs. That traffic repeats them and says nothing about customer demand, so they are excluded from every hit-rate figure. Entity ids are the normalised query text (copilot_key_fields: whitespace collapsed, casefolded); country is null until the Actor takes a country input."
+}
