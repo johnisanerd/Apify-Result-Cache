@@ -3,6 +3,8 @@
   "actor": "johnvc/YoutubeTranscripts",
   "actor_id": "zPumutvB61fpEsglh",
   "schema_version": 1,
+  "fresh_cost_usd": 0.00035,
+  "fresh_cost_note": "Platform cost of one fresh result, from the Console cost-per-1,000-results chart (about $0.35 per 1k, 2026-10-04). Used only by the daily report.",
   "hit_event_default": "videoprocessed",
   "key_fields": ["video_id", "languages", "transcript_type", "translate_to", "preserve_formatting"],
   "exclude_entity_ids": [

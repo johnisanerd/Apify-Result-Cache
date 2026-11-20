@@ -17,7 +17,13 @@ What it does:
      space. cache_delete_index() only ever removes rows that are still
      expired, so a key re-stored meanwhile keeps its row (at worst its new
      object was deleted, which heals itself on the next miss).
-  3. Prints the quota watch, same as `cache_stats.py --quota`.
+  3. Prints the daily report (scripts/daily_report.py): what needs John, what
+     to watch, what could be saved, then the numbers. Needs migration 0009;
+     without it the plain quota watch is printed instead. Each real run adds
+     one line to .cache_history.jsonl (git-ignored), which the next reports
+     use for growth rates and per-namespace baselines.
+
+    uv run python scripts/cache_gc.py --report-only          # the report alone, nothing deleted or recorded
 
 Storage settings come from the same variables the Actors use:
 RESULT_CACHE_S3_ENDPOINT (default: the index project's storage host),
@@ -34,6 +40,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 from _common import load_env_file, quota_report
+from daily_report import build_report, load_history, save_snapshot
 
 from apify_result_cache.db import CacheDB, CacheDBError
 from apify_result_cache.s3 import S3Client, S3Error
@@ -101,11 +108,16 @@ async def _delete_batch(s3: S3Client, refs: list[str]) -> tuple[list[str], int]:
     return deleted, failures
 
 
-async def expire_payloads(db: CacheDB, args) -> None:
+async def expire_payloads(db: CacheDB, args) -> dict:
+    """Delete expired objects and their index rows. An index failure part-way
+    ends the pass but not the run: what was deleted is reported and the next
+    run picks up the rest."""
+    result = {"objects": 0, "rows": 0, "failures": 0, "complete": True, "error": None}
     s3 = storage_client(args.url)
     if s3 is None:
         print("Payload expiry: skipped (RESULT_CACHE_S3_ACCESS_KEY / _SECRET_KEY not set).\n")
-        return
+        result.update(complete=False, error="storage keys not set")
+        return result
     deleted_objects = deleted_rows = failures = 0
     try:
         for batch in range(args.max_batches):
@@ -134,11 +146,37 @@ async def expire_payloads(db: CacheDB, args) -> None:
                 break   # nothing is getting through; stop rather than spin
             if len(rows) < 1000:
                 break
+        else:
+            result.update(complete=False, error=f"stopped at --max-batches {args.max_batches}")
+    except CacheDBError as exc:
+        print(f"Index call failed: {exc}", file=sys.stderr)
+        result.update(complete=False, error=f"index call failed: {exc}")
     finally:
         await s3.aclose()
     if not args.dry_run:
         print(f"Payload expiry: deleted {deleted_objects:,} object(s) and {deleted_rows:,} index row(s)"
               + (f"; {failures} object delete(s) failed" if failures else "") + ".\n")
+    result.update(objects=deleted_objects, rows=deleted_rows, failures=failures)
+    return result
+
+
+async def print_report(db: CacheDB, args, gc: dict | None) -> int:
+    """The daily report, or the plain quota watch where migration 0009 is missing."""
+    quota = await _retry_db(db.cache_quota, "cache_quota")
+    try:
+        report = await _retry_db(lambda: db._rpc("cache_daily_report", {}), "cache_daily_report")
+    except CacheDBError as exc:
+        print(f"Daily report unavailable ({exc}); plain quota watch instead.")
+        lines, code = quota_report(quota, args.plan)
+        print(f"Quota watch ({args.plan} plan, spend cap off; WARN 80%, ERROR 95%)")
+        print("\n".join(lines))
+        return code
+    lines, code, snapshot = build_report(quota, report, load_history(), gc,
+                                         log_retention_days=args.log_retention_days)
+    print("\n".join(lines))
+    if gc is not None and not args.dry_run:
+        save_snapshot(snapshot)
+    return code
 
 
 async def main() -> int:
@@ -149,6 +187,7 @@ async def main() -> int:
     ap.add_argument("--batch", type=int, default=50_000)
     ap.add_argument("--max-batches", type=int, default=200)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--report-only", action="store_true", help="print the daily report; delete and record nothing")
     ap.add_argument("--plan", choices=("pro", "free"), default=os.getenv("RESULT_CACHE_PLAN", "pro"))
     ap.add_argument("--url", default=os.getenv("RESULT_CACHE_INDEX_URL"))
     ap.add_argument("--service-key", default=os.getenv("RESULT_CACHE_SERVICE_KEY"))
@@ -165,6 +204,8 @@ async def main() -> int:
     before = datetime.now(timezone.utc) - timedelta(days=args.log_retention_days)
     db = CacheDB(args.url, args.service_key, read_timeout=60.0)
     try:
+        if args.report_only:
+            return await print_report(db, args, None)
         print(f"Request log: pruning rows older than {before:%Y-%m-%d %H:%M} UTC "
               f"({args.log_retention_days} days){' in ' + args.namespace if args.namespace else ''}.")
         total = 0
@@ -178,12 +219,9 @@ async def main() -> int:
                     break
             print(f"  deleted {total:,} row(s).")
 
-        await expire_payloads(db, args)
-
-        lines, code = quota_report(await db.cache_quota(), args.plan)
-        print(f"Quota watch ({args.plan} plan, spend cap off; WARN 80%, ERROR 95%)")
-        print("\n".join(lines))
-        return code
+        gc = await expire_payloads(db, args)
+        gc["log_pruned"] = total
+        return await print_report(db, args, None if args.dry_run else gc)
     except CacheDBError as exc:
         print(f"Index call failed: {exc}", file=sys.stderr)
         return 2

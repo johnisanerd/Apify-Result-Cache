@@ -36,6 +36,18 @@ Which Actors have the result cache installed, in which mode, and what each insta
   at once with one DELETE per object and then lost its index connection; `S3Client.delete_objects` (DeleteObjects,
   1,000 keys per request) with backoff, a paced single-delete fallback, and retried index calls in `cache_gc.py`.
 - 0006 (`cache_purge_entity`, service role only) applied 2026-10-02 to `apify-result-cache`; verified with a throwaway `test-purge3` namespace (only the named entity removed; anon cannot execute). Used by `scripts/purge_entity.py`.
+- 0009 (`cache_daily_report()`, read-only, service role only) applied 2026-11-20 to `apify-result-cache`. Why: the
+  daily GC run printed "ERROR Database size 100.4%" for a database that had simply grown onto its 12 GB disk (spend
+  cap off), and the same day a 2.8% store-error rate in one namespace was hidden in a 0.12% fleet figure.
+  `cache_gc.py` now ends with the daily report (`scripts/daily_report.py`, rules tested in
+  `tests/test_daily_report.py`): ACTION NEEDED / WATCH / OPPORTUNITIES, then the numbers. It measures the database
+  against the disk it is on (8, 12, 18, 27 GB steps at 90% full, $0.125 per GB a month over 8), projects the next
+  step from `.cache_history.jsonl` (git-ignored, one line per real run, seeded with the 11-12 reading), and judges
+  errors, silence, surges and served-share drops per namespace. Exit code 0 quiet, 1 watch, 2 action. An index
+  timeout during expiry no longer loses the report. Index figures per namespace are a 5% page sample (a 20% sample
+  took 12 s cold against the API's 8 s timeout). `--report-only` prints the report without deleting or recording.
+  A namespace file may carry `fresh_cost_usd` (YouTube: 0.00035) so the report can price cache hits and drop TTL
+  advice that would cost more in fresh fetches than the disk it frees. `cache_stats.py --quota` is unchanged.
 
 ## Project
 
